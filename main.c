@@ -2,6 +2,44 @@
 
 int msg_queue_id;
 
+int is_supported_brand(char brand) {
+    for(int i = 0; i < NUM_ALLOWED_BRANDS; i++) {
+        if(ALLOWED_BRANDS[i] == brand) return 1;
+    }
+    return 0;
+}
+
+void run_client_generator() {
+    srand(time(NULL) ^ getpid());
+    int client_id_counter = 0;
+
+    printf("[Generator %d] Rozpoczynam generowanie klientów.\n", getpid());
+
+    while(1) {
+        char brand = 'A' + (rand() % 26);
+
+        if(is_supported_brand(brand)) {
+            CarMessage msg;
+            msg.mtype = MSG_TYPE_NEW_CLIENT;
+            msg.data.id = client_id_counter++;
+            msg.data.brand = brand;
+            msg.data.is_vip = (rand() % 100 < 2);
+
+            if(msgsnd(msg_queue_id, &msg, sizeof(CarData), 0) == -1) {
+                if(errno == EIDRM) break;
+                printf("[Generator %d] Błąd msgsnd\n", getpid());
+            } else {
+                printf("[Generator %d] Nowy klient o id %d (Auto: %c) wszedł do serwisu.\n", getpid(), msg.data.id, msg.data.brand);
+            }
+        } else {
+            printf("[Generator %d] Nowy klient o id %d (Auto: %c) wszedł do serwisu, ale nie obsługujemy jego marki samochodu.\n", getpid(), client_id_counter++, brand);
+        }
+
+        usleep((rand() % 2000000) + 100000);
+    }
+    exit(0);
+}
+
 void run_mechanic(int id) {
     printf("[Mechanik %d] Obsługuje stanowisko %d.\n", getpid(), id);
     if(id == 7) {
@@ -75,6 +113,7 @@ int main() {
         perror("Błąd: nie powiodło się uruchomienie kierownika.");
         exit(1);
     }
+
     for (int i = 0; i < NUM_MECHANICS; i++) {
         pid = fork();
         if(pid == 0){
@@ -95,11 +134,17 @@ int main() {
         }
     }
 
-    test_client_generator();
+    pid = fork();
+    if(pid == 0) {
+        run_client_generator();
+    }else if(pid < 0) {
+        perror("Błąd: nie powiodło się uruchomienie generatora klientów.");
+        exit(1);
+    }
 
-    sleep(3);
+    sleep(10);
 
-    printf("=== Koniec symulacji ===\n");
+    printf("\n=== Koniec symulacji ===\n");
 
     kill(0, SIGTERM); // na razie do testów, ubicie procesów w ten sposób
 
