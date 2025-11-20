@@ -1,28 +1,70 @@
 #include "common.h"
 
+int msg_queue_id;
+
 void run_mechanic(int id) {
     printf("[Mechanik %d] Obsługuje stanowisko %d.\n", getpid(), id);
     if(id == 7) {
         printf("[Mechanik %d] Obsługuje tylko marki U i Y.\n", getpid()); // z treści zadania
     }
-    sleep(1);
-    exit(0);
+    while(1) {
+        sleep(10);
+    }
 }
 
 void run_service_worker(int id) {
+    CarMessage msg;
     printf("[Obsługa %d] Obsługuje stanowisko obsługi %d.\n", getpid(), id);
-    sleep(1);
+    
+    while(1) {
+        if(msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_NEW_CLIENT, 0) == -1){
+            if(errno = EIDRM) break;
+            printf("[Obsługa %d] Błąd msgrcv", getpid());
+            exit(1);
+        }
+
+        printf("[Obsługa %d] Przyjąłem klienta ID: %d, Auto: %c.\n", getpid(), msg.data.id, msg.data.brand);
+    
+        sleep(1);
+    }
     exit(0);
 }
 
 void run_manager() {
     printf("[Kierownik %d] Nadzoruję pracę serwisu.\n", getpid());
-    sleep(1);
-    exit(0);
+    while(1){
+        sleep(10);
+    }
+}
+
+void test_client_generator() {
+    srand(time(NULL));
+    for(int i = 0; i < 5; i++){
+        CarMessage msg;
+        msg.mtype = MSG_TYPE_NEW_CLIENT;
+        msg.data.id = i + 100;
+        msg.data.brand = ALLOWED_BRANDS[rand() % NUM_ALLOWED_BRANDS];
+
+        if(msgsnd(msg_queue_id, &msg, sizeof(CarData), 0) == -1) {
+            perror("Błąd: nie powiodło się wysłanie testowego klienta.");
+        } else {
+            printf("[Generator] KLient wszedł do serwisu (Auto: %c)\n", msg.data.brand);
+        }
+        sleep(1);
+    }
 }
 
 int main() {
     pid_t pid;
+
+    printf("=== Inicjalizacja IPC ===\n");
+
+    msg_queue_id = msgget(QUEUE_KEY, IPC_CREAT | 0666);
+    if(msg_queue_id == -1){
+        perror("Błąd: nie powiodło się tworzenie kolejki.");
+        exit(1);
+    }
+    printf("[System] Utworzono kolejkę komunikatów o id: %d\n", msg_queue_id);
 
     printf("=== Rozpoczęcie symulacji ===\n");
 
@@ -53,8 +95,19 @@ int main() {
         }
     }
 
-    while(wait(NULL) > 0);
+    test_client_generator();
+
+    sleep(3);
 
     printf("=== Koniec symulacji ===\n");
+
+    kill(0, SIGTERM); // na razie do testów, ubicie procesów w ten sposób
+
+    if(msgctl(msg_queue_id, IPC_RMID, NULL) == -1) {
+        perror("Błąd: nie powiodło się usuwanie kolejki.");
+    }else{
+        printf("[System] Usunięto kolejkę komunikatów.\n");
+    }
+    
     return 0;
 }
