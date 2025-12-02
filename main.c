@@ -1,7 +1,70 @@
 #include "common.h"
 
 int msg_queue_id;
+int sem_id;
 pid_t service_pids[3] = {0};
+
+void init_semaphores()
+{
+    sem_id = semget(SEM_KEY, NUM_MECHANICS, IPC_CREAT | 0666);
+    if (sem_id == -1)
+    {
+        perror("Błąd tworzenia semaforów");
+        exit(1);
+    }
+
+    union semun arg;
+    unsigned short values[NUM_MECHANICS];
+    for (int i = 0; i < NUM_MECHANICS; i++)
+        values[i] = 1;
+    arg.array = values;
+
+    if (semctl(sem_id, 0, SETALL, arg) == -1)
+    {
+        perror("Błąd inicjalizacji semaforów");
+        exit(1);
+    }
+    printf("[System] Utworzono i zainicjalizowano %d semaforów.\n", NUM_MECHANICS);
+}
+
+int reserve_station(char brand)
+{
+    struct sembuf sb;
+    sb.sem_flg = IPC_NOWAIT;
+    sb.sem_op = -1;
+
+    // Jeżeli marka to U lub Y, sprawdzamy najpierw stanowisko 8.
+    if (brand == 'U' || brand == 'Y')
+    {
+        sb.sem_num = 7;
+        if (semop(sem_id, &sb, 1) != -1)
+            return 7;
+    }
+
+    // Sprawdzamy wszystkie stanowiska po kolei w poszukiwaniu wolnego.
+    for (int i = 0; i < 7; i++)
+    {
+        sb.sem_num = i;
+        if (semop(sem_id, &sb, 1) != -1)
+            return i;
+    }
+
+    // Żadne stanowisko nie jest wolne - zwracamy -1.
+    return -1;
+}
+
+void release_station(int mechanic_id)
+{
+    struct sembuf sb;
+    sb.sem_num = mechanic_id;
+    sb.sem_op = 1;
+    sb.sem_flg = 0;
+
+    if (semop(sem_id, &sb, 1) == -1)
+    {
+        perror("[Mechanik] Błąd zwalniania semafora.");
+    }
+}
 
 int is_supported_brand(char brand)
 {
@@ -36,13 +99,16 @@ void run_client_generator()
                 break;
         }
 
-        usleep((rand() % 1000000) + 100000);
+        usleep((rand() % 1500000) + 500000);
     }
     exit(0);
 }
 
 void run_mechanic(int id)
 {
+    CarMessage msg;
+    long my_msg_type = MSG_TYPE_MECHANIC_OFFSET + id;
+
     printf("[Mechanik %d] Obsługuje stanowisko %d.\n", getpid(), id);
     if (id == 7)
     {
@@ -50,8 +116,24 @@ void run_mechanic(int id)
     }
     while (1)
     {
-        sleep(10);
+        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), my_msg_type, 0) == -1)
+        {
+            if (errno == EIDRM || errno == EINTR)
+                break;
+            printf("[Mechanik %d] Błąd msgrcv", getpid());
+            exit(1);
+        }
+
+        printf("    [Mechanik %d | Stacja %d] Rozpoczynam naprawę auta ID: %d (Marka: %c).\n", getpid(), id + 1, msg.data.id, msg.data.brand);
+
+        int repair_time = (rand() % 5) + 3; // 3 - 7 sekund
+        sleep(repair_time);
+
+        printf("    [Mechanik %d | Stacja %d] Koniec naprawy auta ID: %d (Marka: %c).\n", getpid(), id + 1, msg.data.id, msg.data.brand);
+
+        release_station(id);
     }
+    exit(0);
 }
 
 void run_service_worker(int id)
@@ -73,13 +155,29 @@ void run_service_worker(int id)
 
         if (is_supported_brand(msg.data.brand))
         {
-            printf("    -> [Obsługa %d] Marka %c zaakceptowana. Wycena naprawy...\n", getpid(), msg.data.brand);
-            // symulacja wyceny
-            sleep(2);
+            printf("    -> [Obsługa %d] Marka %c zaakceptowana. Szukam wolnego mechanika...\n", getpid(), msg.data.brand);
+
+            int mechanic_id = -1;
+            while (mechanic_id == -1)
+            {
+                mechanic_id = reserve_station(msg.data.brand);
+                    
+                if(mechanic_id == -1){
+                    sleep(1);
+                }
+            }
+
+            printf("    -> [Obsługa %d] Znalazłem wolne stanowisko %d. PRzekazuje auto.\n", getpid(), mechanic_id + 1);
+
+            msg.mtype = MSG_TYPE_MECHANIC_OFFSET + mechanic_id;
+            if(msgsnd(msg_queue_id, &msg, sizeof(CarData), 0) == -1) {
+                perror("Błąd wysyłania auta do mechanika");
+                release_station(mechanic_id);
+            }
         }
         else
         {
-            printf("    -> [Obsługa %d] Marka %c odrzucona. Klient odchodzi.\n", getpid(), msg.data.brand);
+            printf("    -> [Obsługa %d] Marka %c nieobsługiwana. Klient odchodzi.\n", getpid(), msg.data.brand);
             sleep(1);
         }
     }
@@ -156,6 +254,8 @@ int main()
     }
     printf("[System] Utworzono kolejkę komunikatów o id: %d\n", msg_queue_id);
 
+    init_semaphores();
+
     printf("=== Rozpoczęcie symulacji ===\n");
 
     pid = fork();
@@ -205,7 +305,7 @@ int main()
         exit(1);
     }
 
-    sleep(20);
+    sleep(60);
 
     printf("\n=== Koniec symulacji ===\n");
 
@@ -218,7 +318,13 @@ int main()
         printf("[System] Usunięto kolejkę komunikatów.\n");
     }
 
-    kill(0, SIGTERM); // na razie do testów, ubicie procesów w ten sposób
+    if(semctl(sem_id, 0, IPC_RMID) == -1){
+        perror("Błąd: nie powiodło się usuwanie semaforów");
+    }else{
+        printf("[System] Usunięto zbiór semaforów.\n");
+    }
+
+    kill(0, SIGTERM);
 
     return 0;
 }
