@@ -108,30 +108,74 @@ void run_mechanic(int id)
 {
     CarMessage msg;
     long my_msg_type = MSG_TYPE_MECHANIC_OFFSET + id;
+    srand(time(NULL) ^ getpid());
 
     printf("[Mechanik %d] Obsługuje stanowisko %d.\n", getpid(), id);
-    if (id == 7)
-    {
-        printf("[Mechanik %d] Obsługuje tylko marki U i Y.\n", getpid()); // z treści zadania
-    }
+
     while (1)
     {
         if (msgrcv(msg_queue_id, &msg, sizeof(CarData), my_msg_type, 0) == -1)
         {
             if (errno == EIDRM || errno == EINTR)
                 break;
-            printf("[Mechanik %d] Błąd msgrcv", getpid());
+            printf("[Mechanik %d] Błąd msgrcv", id + 1);
             exit(1);
         }
 
-        printf("    [Mechanik %d | Stacja %d] Rozpoczynam naprawę auta ID: %d (Marka: %c).\n", getpid(), id + 1, msg.data.id, msg.data.brand);
+        printf("    -> [Mechanik %d] Rozpoczynam naprawę auta ID: %d (%s). Czas: %ds. Koszt: %d PLN\n",
+               id + 1,
+               msg.data.id,
+               msg.data.service_name,
+               msg.data.time_est,
+               msg.data.cost);
 
-        int repair_time = (rand() % 5) + 3; // 3 - 7 sekund
-        sleep(repair_time);
+        int first_phase = msg.data.time_est / 2;
+        if (first_phase < 1)
+            first_phase = 1;
+        sleep(first_phase);
+        int remaining_time = msg.data.time_est - first_phase;
 
-        printf("    [Mechanik %d | Stacja %d] Koniec naprawy auta ID: %d (Marka: %c).\n", getpid(), id + 1, msg.data.id, msg.data.brand);
+        if (rand() % 100 < CHANCE_EXTRA_FAULT)
+        {
+            printf("    -> [Mechanik %d] Znaleziono dodatkową usterkę (ID: %d)! Konsultacja z obsługą.\n", id + 1, msg.data.id);
+
+            int extra_cost = 200 + (rand() % 300);
+            int extra_time = 2 + (rand() % 3);
+
+            CarMessage consult_msg = msg;
+            consult_msg.mtype = MSG_TYPE_CONSULTATION;
+            consult_msg.data.mechanic_pid = getpid();
+            consult_msg.data.mechanic_id = id;
+            consult_msg.data.cost = extra_cost;
+            consult_msg.data.time_est = extra_time;
+
+            if (msgsnd(msg_queue_id, &consult_msg, sizeof(CarData), 0) != -1)
+            {
+                if (msgrcv(msg_queue_id, &consult_msg, sizeof(CarData), getpid(), 0) != -1)
+                {
+                    if (consult_msg.data.extra_accepted)
+                    {
+                        printf("    -> [Mechanik %d] Klient zaakceptował dopłatę (+%d PLN). Kontynuuję naprawę.\n", id + 1, extra_cost);
+                        msg.data.cost += extra_cost;
+                        remaining_time += extra_time;
+                    }
+                    else
+                    {
+                        printf("    -> [Mechanik %d] Klient odrzucił dopłatę. Naprawiam tylko usterkę podstawową.\n", id + 1);
+                    }
+                }
+            }
+        }
+
+        if (remaining_time > 0)
+            sleep(remaining_time);
+
+        printf("    -> [Mechanik %d] Koniec naprawy auta ID: %d.\n", id + 1, msg.data.id);
 
         release_station(id);
+
+        msg.mtype = MSG_TYPE_BILLING;
+        msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
     }
     exit(0);
 }
@@ -139,49 +183,103 @@ void run_mechanic(int id)
 void run_service_worker(int id)
 {
     CarMessage msg;
-    printf("[Obsługa %d] Obsługuje stanowisko obsługi %d.\n", getpid(), id);
+    srand(time(NULL) ^ getpid());
+    printf("[Obsługa %d] Otworzyłem stanowisko obsługi.\n", id + 1);
 
     while (1)
     {
-        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_NEW_CLIENT, 0) == -1)
+        // Priorytety obsługi:
+        // 1. Płatności
+        // 2. Konsultacje od mechaników
+        // 3. Nowi klienci
+
+        // Płatności
+        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_BILLING, IPC_NOWAIT) != -1)
         {
-            if (errno = EIDRM || errno == EINTR)
-                break;
-            printf("[Obsługa %d] Błąd msgrcv", getpid());
-            exit(1);
+            printf("[Obsługa %d] Pobieram opłatę od ID: %d. Razem %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
+            continue;
         }
 
-        printf("[Obsługa %d] Podszedł klient ID: %d, Auto: %c.\n", getpid(), msg.data.id, msg.data.brand);
-
-        if (is_supported_brand(msg.data.brand))
+        // Konsultacje
+        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_CONSULTATION, IPC_NOWAIT) != -1)
         {
-            printf("    -> [Obsługa %d] Marka %c zaakceptowana. Szukam wolnego mechanika...\n", getpid(), msg.data.brand);
+            printf("[Obsługa %d] Telefon do klienta ID: %d w sprawie dodatkowej usterki. Koszt %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
+
+            sleep(1); // Symulacja rozmowy
+
+            if (rand() % 100 < CHANCE_REJECT_EXTRA)
+            {
+                printf("    -> [Obsługa %d] Klient ID: %d nie zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
+                msg.data.extra_accepted = 0;
+            }
+            else
+            {
+                printf("    -> [Obsługa %d] Klient ID: %d zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
+                msg.data.extra_accepted = 1;
+            }
+
+            msg.mtype = msg.data.mechanic_pid;
+            msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
+            continue;
+        }
+
+        // Nowy klient
+        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_NEW_CLIENT, IPC_NOWAIT) != -1)
+        {
+            printf("[Obsługa %d] Podszedł klient ID: %d, Auto: %c.\n", id + 1, msg.data.id, msg.data.brand);
+
+            if (!is_supported_brand(msg.data.brand))
+            {
+                printf("    -> [Obsługa %d] Marka %c nieobsługiwana. Klient odchodzi.\n", id + 1, msg.data.brand);
+                continue;
+            }
+
+            int service_id = rand() % NUM_SERVICES;
+            strcpy(msg.data.service_name, SERVICE_LIST[service_id].name);
+            msg.data.cost = SERVICE_LIST[service_id].base_cost;
+            msg.data.time_est = SERVICE_LIST[service_id].base_time;
+
+            printf("    -> [Obsługa %d] Propozycja: %s, Koszt: %d, Czas: %ds.\n", id + 1, msg.data.service_name, msg.data.cost, msg.data.time_est);
+
+            if (rand() % 100 < CHANCE_REJECT_INITIAL)
+            {
+                printf("    -> [Obsługa %d] Klient ID: %d: Odmawia z powodu ceny.\n", id + 1, msg.data.id);
+                continue;
+            }
 
             int mechanic_id = -1;
-            while (mechanic_id == -1)
+            int attempts = 0;
+            while (mechanic_id == -1 && attempts < 3)
             {
                 mechanic_id = reserve_station(msg.data.brand);
-                    
-                if(mechanic_id == -1){
-                    sleep(1);
+
+                if (mechanic_id == -1)
+                {
+                    usleep(200000);
+                    attempts++;
                 }
             }
 
-            printf("    -> [Obsługa %d] Znalazłem wolne stanowisko %d. PRzekazuje auto.\n", getpid(), mechanic_id + 1);
+            if (mechanic_id != -1)
+            {
+                printf("    -> [Obsługa %d] Znalazłem wolne stanowisko %d. Przekazuje auto.\n", id + 1, mechanic_id + 1);
 
-            msg.mtype = MSG_TYPE_MECHANIC_OFFSET + mechanic_id;
-            if(msgsnd(msg_queue_id, &msg, sizeof(CarData), 0) == -1) {
-                perror("Błąd wysyłania auta do mechanika");
-                release_station(mechanic_id);
+                msg.mtype = MSG_TYPE_MECHANIC_OFFSET + mechanic_id;
+                if (msgsnd(msg_queue_id, &msg, sizeof(CarData), 0) == -1)
+                {
+                    perror("Błąd wysyłania auta do mechanika");
+                    release_station(mechanic_id);
+                }
+            }else {
+                printf("    -> [Obsługa %d] Brak wolnych stanowisk dla ID: %d. Klient rezygnuje z czekania.\n", id + 1, msg.data.id);
             }
+
+            continue;
         }
-        else
-        {
-            printf("    -> [Obsługa %d] Marka %c nieobsługiwana. Klient odchodzi.\n", getpid(), msg.data.brand);
-            sleep(1);
-        }
+
+        usleep(10000);
     }
-    printf("[Obsługa %d] Zamykam stanowisko nr %d.\n", getpid(), id + 1);
+    printf("[Obsługa %d] Zamykam stanowisko nr %d.\n", id + 1, id + 1);
     exit(0);
 }
 
@@ -318,9 +416,12 @@ int main()
         printf("[System] Usunięto kolejkę komunikatów.\n");
     }
 
-    if(semctl(sem_id, 0, IPC_RMID) == -1){
+    if (semctl(sem_id, 0, IPC_RMID) == -1)
+    {
         perror("Błąd: nie powiodło się usuwanie semaforów");
-    }else{
+    }
+    else
+    {
         printf("[System] Usunięto zbiór semaforów.\n");
     }
 
