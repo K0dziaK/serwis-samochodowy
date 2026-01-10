@@ -2,20 +2,83 @@
 #include "ipc_utils.h"
 #include "roles.h"
 
+volatile sig_atomic_t speed_mode = 0;   // 0 - normalny, 1 - szybki
+volatile sig_atomic_t closing_mode = 0; // 1 = zamknij po obecnym aucie
+
+void mechanic_signal_handler(int sig)
+{
+    if (sig == SIG_SPEED_UP)
+    {
+        if (speed_mode == 0)
+        {
+            speed_mode = 1;
+            char buff[] = "\n[SIGNAL] Otrzymano rozkaz przyśpieszenia pracy!\n";
+            write(STDOUT_FILENO, buff, sizeof(buff) - 1);
+        }
+        else
+        {
+            // ignoruj
+        }
+    }
+    else if (sig == SIG_NORMAL_SPEED)
+    {
+        if (speed_mode == 1)
+        {
+            speed_mode = 0;
+            char buff[] = "\n[SIGNAL] Powrót do normalnego tempa.\n";
+            write(STDOUT_FILENO, buff, sizeof(buff) - 1);
+        }
+        else
+        {
+            // ignoruj
+        }
+    }
+    else if (sig == SIG_CLOSE_STATION)
+    {
+        closing_mode = 1;
+        char buff[] = "\n[SIGNAL] Rozkaz zamknięcia stanowiska po obecnej naprawie.\n";
+        write(STDOUT_FILENO, buff, sizeof(buff) - 1);
+    }
+    else if (sig == SIG_FIRE)
+    {
+        char buff[] = "\n[SIGNAL] POŻAR! UCIEKAM!!\n";
+        write(STDERR_FILENO, buff, sizeof(buff) - 1);
+        _exit(0);
+    }
+}
+
 void run_mechanic(int id)
 {
     CarMessage msg;
     long my_msg_type = MSG_TYPE_MECHANIC_OFFSET + id;
     srand(time(NULL) ^ getpid());
 
+    // Rejestracja sygnałów
+    struct sigaction sa;
+    sa.sa_handler = mechanic_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    sigaction(SIG_SPEED_UP, &sa, NULL);
+    sigaction(SIG_NORMAL_SPEED, &sa, NULL);
+    sigaction(SIG_CLOSE_STATION, &sa, NULL);
+    sigaction(SIG_FIRE, &sa, NULL);
+
     printf("[Mechanik %d] Obsługuje stanowisko %d.\n", getpid(), id);
 
     while (1)
     {
-        // Oczekiwanie na samochód przypisany do tego stanowiska
+        if (closing_mode)
+        {
+            printf("[Mechanik %d] Stanowisko zamknięte przez Kierownika. Kończę pracę.\n", id + 1);
+            break;
+        }
+
         if (msgrcv(msg_queue_id, &msg, sizeof(CarData), my_msg_type, 0) == -1)
         {
-            if (errno == EIDRM || errno == EINTR)
+            if (errno == EINTR)
+                continue;
+            if (errno == EIDRM)
                 break;
             printf("[Mechanik %d] Błąd msgrcv", id + 1);
             exit(1);
@@ -28,12 +91,18 @@ void run_mechanic(int id)
                msg.data.time_est,
                msg.data.cost);
 
-        // Symulacja pierwszej fazy naprawy
-        int first_phase = msg.data.time_est / 2;
-        if (first_phase < 1) first_phase = 1;
-        sleep(first_phase);
-        
-        int remaining_time = msg.data.time_est - first_phase;
+        int total_time = msg.data.time_est;
+        if(speed_mode) {
+            total_time /= 2;
+            if(total_time < 1) total_time = 1;
+            printf("    -> [Mechanik %d] Wykonuje przyśpieszoną naprawę!", id + 1);
+        }
+
+        int time_left = total_time;
+        while (time_left > 0)
+        {
+            time_left = sleep(time_left);
+        }
 
         // Losowanie dodatkowej usterki
         if (rand() % 100 < CHANCE_EXTRA_FAULT)
@@ -60,7 +129,7 @@ void run_mechanic(int id)
                     {
                         printf("    -> [Mechanik %d] Klient zaakceptował dopłatę (+%d PLN). Kontynuuję naprawę.\n", id + 1, extra_cost);
                         msg.data.cost += extra_cost;
-                        remaining_time += extra_time;
+                        sleep(extra_time);
                     }
                     else
                     {
@@ -70,10 +139,6 @@ void run_mechanic(int id)
             }
         }
 
-        // Dokończenie naprawy
-        if (remaining_time > 0)
-            sleep(remaining_time);
-
         printf("    -> [Mechanik %d] Koniec naprawy auta ID: %d.\n", id + 1, msg.data.id);
 
         release_station(id);
@@ -82,5 +147,6 @@ void run_mechanic(int id)
         msg.mtype = MSG_TYPE_BILLING;
         msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
     }
+    
     exit(0);
 }

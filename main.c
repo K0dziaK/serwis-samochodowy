@@ -55,6 +55,8 @@ void start_manager()
 
 void start_mechanics()
 {
+    SharedData* pids_data = attach_shared_pids();
+
     for (int i = 0; i < NUM_MECHANICS; i++)
     {
         int pid = fork();
@@ -62,12 +64,18 @@ void start_mechanics()
         {
             run_mechanic(i);
         }
+        else if (pid > 0)
+        {
+            pids_data->mechanic_pids[i] = pid;
+        }
         else if (pid < 0)
         {
             perror("Błąd: nie powiodło się uruchomienie mechanika.");
             exit(1);
         }
     }
+
+    shmdt(pids_data);
 }
 
 void start_generator()
@@ -103,6 +111,7 @@ int main()
     init_queue();
     init_semaphores();
     init_shared_time();
+    init_shared_pids();
 
     printf("=== Rozpoczęcie symulacji ===\n");
 
@@ -119,6 +128,7 @@ int main()
     clean_queue();
     clean_semaphores();
     remove_shared_time();
+    remove_shared_pids();
 
     // Zabicie wszystkich procesów potomnych
     kill(0, SIGTERM);

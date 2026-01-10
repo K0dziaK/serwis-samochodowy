@@ -18,6 +18,11 @@
 #define NUM_MECHANICS 8
 #define VIP_CUSTOMER_CHANCE 2
 
+#define SIG_CLOSE_STATION   SIGUSR1     // Zamknij stanowisko
+#define SIG_SPEED_UP        SIGUSR2     // Przyśpiesz pracę
+#define SIG_NORMAL_SPEED    SIGRTMIN    // Przywróć normalny czas
+#define SIG_FIRE            SIGQUIT     // Pożar
+
 // Godziny pracy
 #define TP 8                    // Godzina otwarcia
 #define TK 18                   // Godzina zamknięcia
@@ -30,6 +35,7 @@
 #define QUEUE_KEY 21370
 #define SEM_KEY 21371
 #define SHM_TIME_KEY 21372
+#define SHM_PIDS_KEY 21373
 
 #define MSG_TYPE_NEW_CLIENT 1   // Klient -> Obsługa (podejście do kasy)
 #define MSG_TYPE_CONSULTATION 2 // Mechanik -> Obsługa (Dodatkowa usterka)
@@ -69,11 +75,16 @@ typedef struct {
     int current_hour;
 } SharedTime;
 
+typedef struct {
+    pid_t mechanic_pids[NUM_MECHANICS];
+} SharedData;
+
 extern int msg_queue_id;
 extern int sem_id;
 extern const char ALLOWED_BRANDS[];
 extern const int NUM_ALLOWED_BRANDS;
 extern const Service SERVICE_LIST[];
 extern const int NUM_SERVICES;
+extern int shm_pids_id;
 
 #endif

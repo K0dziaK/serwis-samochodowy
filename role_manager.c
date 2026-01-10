@@ -1,13 +1,86 @@
 #include "common.h"
 #include "roles.h"
+#include "ipc_utils.h"
+#include <pthread.h>
 
 static pid_t local_service_pids[3] = {0};
 
+void *command_thread(void *arg)
+{
+    (void)arg;
+    SharedData *pids_data = attach_shared_pids();
+    if (!pids_data)
+        return NULL;
+
+    printf("\n--- MENU KIEROWNIKA ---\n");
+    printf("[1 ID] - Zamknij stanowisko ID (Sygnał 1)\n");
+    printf("[2 ID] - Szybkie tempo stanowisko ID (Sygnał 2)\n");
+    printf("[3 ID] - Normalne tempo stanowisko ID (Sygnał 3)\n");
+    printf("[4] - Pożar! Ewakuacja wszystkich (Sygnał 4)\n");
+
+    int cmd, target_id;
+    while (1)
+    {
+        if (scanf("%d", &cmd) == 1)
+        {
+            if (cmd == 4)
+            {
+                printf("[Kierownik] Ogłaszam alarm pożarowy!\n");
+                kill(0, SIG_FIRE);
+                break;
+            }
+
+            if (scanf("%d", &target_id) == 1)
+            {
+                if (target_id < 1 || target_id > NUM_MECHANICS)
+                {
+                    printf("Niepoprawne ID mechanika (1-%d)", NUM_MECHANICS);
+                    continue;
+                }
+
+                pid_t target_pid = pids_data->mechanic_pids[target_id - 1];
+                if (target_pid == 0)
+                {
+                    printf("Mechanik %d nie pracuje.\n", target_pid);
+                    continue;
+                }
+
+                switch (cmd)
+                {
+                case 1:
+                    printf("[Kierownik] Zamykam stanowisko %d (PID %d)\n", target_id, target_pid);
+                    kill(target_pid, SIG_CLOSE_STATION);
+                    break;
+                case 2:
+                    printf("[Kierownik] Przyśpieszam stanowisko %d (PID %d)\n", target_id, target_pid);
+                    kill(target_pid, SIG_SPEED_UP);
+                    break;
+                case 3:
+                    printf("[Kierownik] Spowalniam stanowisko %d (PID %d)\n", target_id, target_pid);
+                    kill(target_pid, SIG_NORMAL_SPEED);
+                    break;
+
+                default:
+                    printf("Nieznana komenda.\n");
+                    break;
+                }
+            }
+        }
+    }
+    shmdt(pids_data);
+    return NULL;
+}
+
 void run_manager()
 {
+
+    pthread_t tid;
+    pthread_create(&tid, NULL, command_thread, NULL);
+    pthread_detach(tid);
+
     struct msqid_ds buf;
     printf("[Kierownik %d] Rozpoczynam monitorowanie kolejki.\n", getpid());
-    
+
     while (1)
     {
         if (msgctl(msg_queue_id, IPC_STAT, &buf) == -1)

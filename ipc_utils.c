@@ -143,3 +143,34 @@ void remove_shared_time()
     if (id != -1)
         shmctl(id, IPC_RMID, NULL);
 }
+
+int shm_pids_id = -1;
+
+SharedData *attach_shared_pids()
+{
+    int id = shmget(SHM_PIDS_KEY, sizeof(SharedData), 0666);
+    if (id == -1)
+        return NULL;
+    return (SharedData *)shmat(id, NULL, 0);
+}
+
+void init_shared_pids()
+{
+    shm_pids_id = shmget(SHM_PIDS_KEY, sizeof(SharedData), IPC_CREAT | 0666);
+    if (shm_pids_id == -1)
+    {
+        perror("Błąd tworzenia pamięci dzielonej dla pid");
+        exit(1);
+    }
+    SharedData *data = (SharedData *)shmat(shm_pids_id, NULL, 0);
+    memset(data, 0, sizeof(SharedData));
+    shmdt(data);
+    printf("[System] Pamięć dzielona dla pid zainicjalizowana.\n");
+}
+
+void remove_shared_pids()
+{
+    int id = shmget(SHM_PIDS_KEY, sizeof(SharedData), 0666);
+    if (id != -1)
+        shmctl(id, IPC_RMID, NULL);
+}

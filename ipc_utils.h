@@ -24,4 +24,8 @@ SharedTime* attach_shared_time();
 void init_shared_time();
 void remove_shared_time();
 
+SharedData* attach_shared_pids();
+void init_shared_pids();
+void remove_shared_pids();
+
 #endif
