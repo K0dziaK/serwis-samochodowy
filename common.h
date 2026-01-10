@@ -30,6 +30,7 @@
 
 #define MSG_TYPE_MECHANIC_OFFSET 100
 
+// --- Struktury danych ---
 typedef struct {
     int id;
     char brand;
@@ -49,29 +50,17 @@ typedef struct {
     CarData data;
 } CarMessage;
 
-const char ALLOWED_BRANDS[] = {'A','E','I','O','U','Y'};
-const int NUM_ALLOWED_BRANDS = 6;
-
-union semun {
-    int val;
-    struct semid_ds *buf;
-    unsigned short *array;
-    struct seminfo *__buf;
-};
-
 typedef struct {
     char name[30];
     int base_cost;
     int base_time;
 } Service;
 
-const Service SERVICE_LIST[] = {
-    {"Wymiana oleju", 300, 3},
-    {"Wymiana klocków", 400, 4},
-    {"Naprawa silnika", 2000, 8},
-    {"Wymiana opon", 150, 2},
-    {"Diagnostyka", 100, 2}
-};
-const int NUM_SERVICES = 5;
+extern int msg_queue_id;
+extern int sem_id;
+extern const char ALLOWED_BRANDS[];
+extern const int NUM_ALLOWED_BRANDS;
+extern const Service SERVICE_LIST[];
+extern const int NUM_SERVICES;
 
 #endif
