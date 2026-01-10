@@ -1,12 +1,36 @@
 #include "common.h"
 #include "ipc_utils.h"
 
-union semun {
+union semun
+{
     int val;
     struct semid_ds *buf;
     unsigned short *array;
     struct seminfo *__buf;
 };
+
+void init_queue()
+{
+    msg_queue_id = msgget(QUEUE_KEY, IPC_CREAT | 0666);
+    if (msg_queue_id == -1)
+    {
+        perror("Błąd: nie powiodło się tworzenie kolejki.");
+        exit(1);
+    }
+    printf("[System] Utworzono kolejkę komunikatów o id: %d\n", msg_queue_id);
+}
+
+void clean_queue()
+{
+    if (msgctl(msg_queue_id, IPC_RMID, NULL) == -1)
+    {
+        perror("Błąd: nie powiodło się usuwanie kolejki.");
+    }
+    else
+    {
+        printf("[System] Usunięto kolejkę komunikatów.\n");
+    }
+}
 
 void init_semaphores()
 {
@@ -29,6 +53,18 @@ void init_semaphores()
         exit(1);
     }
     printf("[System] Utworzono i zainicjalizowano %d semaforów.\n", NUM_MECHANICS);
+}
+
+void clean_semaphores()
+{
+    if (semctl(sem_id, 0, IPC_RMID) == -1)
+    {
+        perror("Błąd: nie powiodło się usuwanie semaforów");
+    }
+    else
+    {
+        printf("[System] Usunięto zbiór semaforów.\n");
+    }
 }
 
 int reserve_station(char brand)
@@ -68,4 +104,42 @@ void release_station(int mechanic_id)
     {
         perror("[Mechanik] Błąd zwalniania semafora.");
     }
+}
+
+int shm_time_id = -1;
+
+void init_shared_time()
+{
+    shm_time_id = shmget(SHM_TIME_KEY, sizeof(SharedTime), IPC_CREAT | 0666);
+    if (shm_time_id == -1)
+    {
+        perror("Błąd tworzenia pamięci dzielonej czasu.");
+        exit(1);
+    }
+
+    SharedTime *time_ptr = (SharedTime *)shmat(shm_time_id, NULL, 0);
+    if (time_ptr == (void *)-1)
+    {
+        perror("Błąd przyłączania czasu.");
+        exit(1);
+    }
+    time_ptr->current_hour = 6;
+    shmdt(time_ptr);
+    printf("[System] Zegar zainicjalizowany.\n");
+}
+
+SharedTime *attach_shared_time()
+{
+    int id = shmget(SHM_TIME_KEY, sizeof(SharedTime), 0666);
+    if (id == -1)
+        return NULL;
+    SharedTime *ptr = (SharedTime *)shmat(id, NULL, 0);
+    return (ptr == (void *)-1 ? NULL : ptr);
+}
+
+void remove_shared_time()
+{
+    int id = shmget(SHM_TIME_KEY, sizeof(SharedTime), 0666);
+    if (id != -1)
+        shmctl(id, IPC_RMID, NULL);
 }

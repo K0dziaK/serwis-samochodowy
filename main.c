@@ -2,28 +2,46 @@
 #include "ipc_utils.h"
 #include "roles.h"
 
-int main()
+void run_time_manager()
 {
-    pid_t pid;
+    SharedTime *time_ptr = attach_shared_time();
+    if (!time_ptr)
+        exit(1);
 
-    printf("=== Inicjalizacja IPC ===\n");
-
-    // Tworzenie kolejki
-    msg_queue_id = msgget(QUEUE_KEY, IPC_CREAT | 0666);
-    if (msg_queue_id == -1)
+    printf("[ZEGAR] Start symulacji czasu. 1h = 2s rzeczywista.\n");
+    while (1)
     {
-        perror("Błąd: nie powiodło się tworzenie kolejki.");
+        printf("\n=== GODZINA %02d:00 ===\n", time_ptr->current_hour);
+        if (time_ptr->current_hour == TP)
+            printf("[System] Warsztat został otwarty.\n");
+        if (time_ptr->current_hour == TK)
+            printf("[System] Warsztat został zamknięty.\n");
+
+        sleep(2);
+
+        time_ptr->current_hour++;
+        if (time_ptr->current_hour >= 24)
+            time_ptr->current_hour = 0;
+    }
+}
+
+void start_time_manager()
+{
+    int pid = fork();
+    if (pid == 0)
+    {
+        run_time_manager();
+    }
+    else if (pid < 0)
+    {
+        perror("Błąd: nie powiodło się uruchomienie zegara.");
         exit(1);
     }
-    printf("[System] Utworzono kolejkę komunikatów o id: %d\n", msg_queue_id);
+}
 
-    // Tworzenie i inicjalizacja semaforów
-    init_semaphores();
-
-    printf("=== Rozpoczęcie symulacji ===\n");
-
-    // 1. Uruchomienie Kierownika
-    pid = fork();
+void start_manager()
+{
+    int pid = fork();
     if (pid == 0)
     {
         run_manager();
@@ -33,11 +51,13 @@ int main()
         perror("Błąd: nie powiodło się uruchomienie kierownika.");
         exit(1);
     }
+}
 
-    // 2. Uruchomienie Mechaników (8 stanowisk)
+void start_mechanics()
+{
     for (int i = 0; i < NUM_MECHANICS; i++)
     {
-        pid = fork();
+        int pid = fork();
         if (pid == 0)
         {
             run_mechanic(i);
@@ -48,21 +68,11 @@ int main()
             exit(1);
         }
     }
+}
 
-    // 3. Uruchomienie pierwszego pracownika obsługi (Kierownik zarządza resztą)
-    pid = fork();
-    if (pid == 0)
-    {
-        run_service_worker(0);
-    }
-    else if (pid < 0)
-    {
-        perror("Błąd: nie powiodło się uruchamianie obsługi.");
-        exit(1);
-    }
-
-    // 4. Uruchomienie Generatora Klientów
-    pid = fork();
+void start_generator()
+{
+    int pid = fork();
     if (pid == 0)
     {
         run_client_generator();
@@ -72,30 +82,43 @@ int main()
         perror("Błąd: nie powiodło się uruchomienie generatora klientów.");
         exit(1);
     }
+}
 
-    // Symulacja działa przez 60 sekund
+void start_service()
+{
+    int pid = fork();
+    if (pid == 0)
+    {
+        run_service_worker(0);
+    }
+    else if (pid < 0)
+    {
+        perror("Błąd: nie powiodło się uruchamianie obsługi.");
+        exit(1);
+    }
+}
+
+int main()
+{
+    init_queue();
+    init_semaphores();
+    init_shared_time();
+
+    printf("=== Rozpoczęcie symulacji ===\n");
+
+    start_time_manager();
+    start_manager();
+    start_mechanics();
+    start_service();
+    start_generator();
+
     sleep(60);
 
     printf("\n=== Koniec symulacji ===\n");
 
-    // Sprzątanie IPC
-    if (msgctl(msg_queue_id, IPC_RMID, NULL) == -1)
-    {
-        perror("Błąd: nie powiodło się usuwanie kolejki.");
-    }
-    else
-    {
-        printf("[System] Usunięto kolejkę komunikatów.\n");
-    }
-
-    if (semctl(sem_id, 0, IPC_RMID) == -1)
-    {
-        perror("Błąd: nie powiodło się usuwanie semaforów");
-    }
-    else
-    {
-        printf("[System] Usunięto zbiór semaforów.\n");
-    }
+    clean_queue();
+    clean_semaphores();
+    remove_shared_time();
 
     // Zabicie wszystkich procesów potomnych
     kill(0, SIGTERM);

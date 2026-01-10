@@ -16,10 +16,55 @@ void run_service_worker(int id)
 {
     CarMessage msg;
     srand(time(NULL) ^ getpid());
+    SharedTime *time_ptr = attach_shared_time();
+
     printf("[Obsługa %d] Otworzyłem stanowisko obsługi.\n", id + 1);
 
     while (1)
     {
+        int hour = time_ptr->current_hour;
+        int is_open = (hour >= TP && hour < TK);
+
+        if (!is_open)
+        {
+            // Jeżeli warsztat jest zamknięty, nie przyjmujemy nowych klientów
+            // Obsługujemy płatności i konsultacje.
+
+            // Płatności
+            if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_BILLING, IPC_NOWAIT) != -1)
+            {
+                printf("[Obsługa %d] Pobieram opłatę od ID: %d. Razem %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
+                continue;
+            }
+
+            // Konsultacje
+            if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_CONSULTATION, IPC_NOWAIT) != -1)
+            {
+                printf("[Obsługa %d] Telefon do klienta ID: %d w sprawie dodatkowej usterki. Koszt %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
+
+                sleep(1); // Symulacja rozmowy
+
+                if (rand() % 100 < CHANCE_REJECT_EXTRA)
+                {
+                    printf("    -> [Obsługa %d] Klient ID: %d nie zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
+                    msg.data.extra_accepted = 0;
+                }
+                else
+                {
+                    printf("    -> [Obsługa %d] Klient ID: %d zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
+                    msg.data.extra_accepted = 1;
+                }
+
+                msg.mtype = msg.data.mechanic_pid;
+                msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
+                continue;
+            }
+
+            usleep(500000);
+            continue;
+        }
+
+        // W godzinach otwarcia obsługujemy klientów, ale są najmniej priorytetowi.
         // Priorytety obsługi: 1. Płatności, 2. Konsultacje, 3. Nowi klienci
 
         // Płatności
@@ -63,13 +108,9 @@ void run_service_worker(int id)
                 continue;
             }
 
-            int service_id = rand() % NUM_SERVICES;
-            strcpy(msg.data.service_name, SERVICE_LIST[service_id].name);
-            msg.data.cost = SERVICE_LIST[service_id].base_cost;
-            msg.data.time_est = SERVICE_LIST[service_id].base_time;
-
-            printf("    -> [Obsługa %d] Propozycja: %s, Koszt: %d, Czas: %ds.\n", id + 1, msg.data.service_name, msg.data.cost, msg.data.time_est);
-
+            printf("[Obsługa %d] [Godz: %d:00] Obsługa klienta ID: %d (%s).\n",
+                   id + 1, hour, msg.data.id, msg.data.is_critical_fault ? "Krytyczna" : "Normalna");
+                   
             if (rand() % 100 < CHANCE_REJECT_INITIAL)
             {
                 printf("    -> [Obsługa %d] Klient ID: %d: Odmawia z powodu ceny.\n", id + 1, msg.data.id);
@@ -100,7 +141,9 @@ void run_service_worker(int id)
                     perror("Błąd wysyłania auta do mechanika");
                     release_station(mechanic_id);
                 }
-            } else {
+            }
+            else
+            {
                 printf("    -> [Obsługa %d] Brak wolnych stanowisk dla ID: %d. Klient rezygnuje z czekania.\n", id + 1, msg.data.id);
             }
 

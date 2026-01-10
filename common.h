@@ -9,6 +9,7 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/sem.h>
+#include <sys/shm.h>
 #include <time.h>
 #include <string.h>
 #include <errno.h>
@@ -17,12 +18,18 @@
 #define NUM_MECHANICS 8
 #define VIP_CUSTOMER_CHANCE 2
 
+// Godziny pracy
+#define TP 8                    // Godzina otwarcia
+#define TK 18                   // Godzina zamknięcia
+#define T1 2                    // Czas oczekiwania przed otwarciem
+
 #define CHANCE_REJECT_INITIAL 2 // 2% klientów odrzuca wstępną wycenę
 #define CHANCE_EXTRA_FAULT 20   // 20% szans na dodatkową usterkę
 #define CHANCE_REJECT_EXTRA 20  // 20% klientów odrzuca dodatkową naprawę
 
 #define QUEUE_KEY 21370
 #define SEM_KEY 21371
+#define SHM_TIME_KEY 21372
 
 #define MSG_TYPE_NEW_CLIENT 1   // Klient -> Obsługa (podejście do kasy)
 #define MSG_TYPE_CONSULTATION 2 // Mechanik -> Obsługa (Dodatkowa usterka)
@@ -39,6 +46,7 @@ typedef struct {
     char service_name[50];
     int cost;
     int time_est;
+    int is_critical_fault;
 
     int mechanic_pid;
     int mechanic_id;
@@ -54,7 +62,12 @@ typedef struct {
     char name[30];
     int base_cost;
     int base_time;
+    int is_critical;
 } Service;
+
+typedef struct {
+    int current_hour;
+} SharedTime;
 
 extern int msg_queue_id;
 extern int sem_id;
