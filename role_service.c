@@ -1,157 +1,199 @@
 #include "common.h"
-#include "ipc_utils.h"
-#include "roles.h"
 
-int is_supported_brand(char brand)
+// Flaga dla sygnału SIGTERM (dla stanowisk 2 i 3 zarządzanych przez menedżera)
+static volatile int service_should_exit = 0;
+
+static void service_sigterm_handler(int sig)
 {
-    for (int i = 0; i < NUM_ALLOWED_BRANDS; i++)
-    {
-        if (ALLOWED_BRANDS[i] == brand)
-            return 1;
-    }
-    return 0;
+    (void)sig;
+    service_should_exit = 1;
 }
 
-void run_service_worker(int id)
+void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
 {
-    CarMessage msg;
-    srand(time(NULL) ^ getpid());
-    SharedTime *time_ptr = attach_shared_time();
+    global_sem_id = sem_id;
+    shared_data *shm = (shared_data *)safe_shmat(shm_id, NULL, 0);
+    msg_buf msg;
 
-    printf("[Obsługa %d] Otworzyłem stanowisko obsługi.\n", id + 1);
-
-    while (1)
+    // Stanowiska 2 i 3 reagują na SIGTERM od menedżera
+    if (staff_id > 1)
     {
-        int hour = time_ptr->current_hour;
-        int is_open = (hour >= TP && hour < TK);
-
-        if (!is_open)
-        {
-            // Jeżeli warsztat jest zamknięty, nie przyjmujemy nowych klientów
-            // Obsługujemy płatności i konsultacje.
-
-            // Płatności
-            if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_BILLING, IPC_NOWAIT) != -1)
-            {
-                printf("[Obsługa %d] Pobieram opłatę od ID: %d. Razem %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
-                continue;
-            }
-
-            // Konsultacje
-            if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_CONSULTATION, IPC_NOWAIT) != -1)
-            {
-                printf("[Obsługa %d] Telefon do klienta ID: %d w sprawie dodatkowej usterki. Koszt %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
-
-                sleep(1); // Symulacja rozmowy
-
-                if (rand() % 100 < CHANCE_REJECT_EXTRA)
-                {
-                    printf("    -> [Obsługa %d] Klient ID: %d nie zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
-                    msg.data.extra_accepted = 0;
-                }
-                else
-                {
-                    printf("    -> [Obsługa %d] Klient ID: %d zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
-                    msg.data.extra_accepted = 1;
-                }
-
-                msg.mtype = msg.data.mechanic_pid;
-                msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
-                continue;
-            }
-
-            usleep(500000);
-            continue;
-        }
-
-        // W godzinach otwarcia obsługujemy klientów, ale są najmniej priorytetowi.
-        // Priorytety obsługi: 1. Płatności, 2. Konsultacje, 3. Nowi klienci
-
-        // Płatności
-        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_BILLING, IPC_NOWAIT) != -1)
-        {
-            printf("[Obsługa %d] Pobieram opłatę od ID: %d. Razem %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
-            continue;
-        }
-
-        // Konsultacje
-        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_CONSULTATION, IPC_NOWAIT) != -1)
-        {
-            printf("[Obsługa %d] Telefon do klienta ID: %d w sprawie dodatkowej usterki. Koszt %d PLN.\n", id + 1, msg.data.id, msg.data.cost);
-
-            sleep(1); // Symulacja rozmowy
-
-            if (rand() % 100 < CHANCE_REJECT_EXTRA)
-            {
-                printf("    -> [Obsługa %d] Klient ID: %d nie zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
-                msg.data.extra_accepted = 0;
-            }
-            else
-            {
-                printf("    -> [Obsługa %d] Klient ID: %d zgodził się na dodatkowe koszty.\n", id + 1, msg.data.id);
-                msg.data.extra_accepted = 1;
-            }
-
-            msg.mtype = msg.data.mechanic_pid;
-            msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
-            continue;
-        }
-
-        // Nowi klienci
-        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), MSG_TYPE_NEW_CLIENT, IPC_NOWAIT) != -1)
-        {
-            printf("[Obsługa %d] Podszedł klient ID: %d, Auto: %c.\n", id + 1, msg.data.id, msg.data.brand);
-
-            if (!is_supported_brand(msg.data.brand))
-            {
-                printf("    -> [Obsługa %d] Marka %c nieobsługiwana. Klient odchodzi.\n", id + 1, msg.data.brand);
-                continue;
-            }
-
-            printf("[Obsługa %d] [Godz: %d:00] Obsługa klienta ID: %d (%s).\n",
-                   id + 1, hour, msg.data.id, msg.data.is_critical_fault ? "Krytyczna" : "Normalna");
-                   
-            if (rand() % 100 < CHANCE_REJECT_INITIAL)
-            {
-                printf("    -> [Obsługa %d] Klient ID: %d: Odmawia z powodu ceny.\n", id + 1, msg.data.id);
-                continue;
-            }
-
-            // Próba znalezienia mechanika
-            int mechanic_id = -1;
-            int attempts = 0;
-            while (mechanic_id == -1 && attempts < 3)
-            {
-                mechanic_id = reserve_station(msg.data.brand);
-
-                if (mechanic_id == -1)
-                {
-                    usleep(200000); // krótkie oczekiwanie
-                    attempts++;
-                }
-            }
-
-            if (mechanic_id != -1)
-            {
-                printf("    -> [Obsługa %d] Znalazłem wolne stanowisko %d. Przekazuje auto.\n", id + 1, mechanic_id + 1);
-
-                msg.mtype = MSG_TYPE_MECHANIC_OFFSET + mechanic_id;
-                if (msgsnd(msg_queue_id, &msg, sizeof(CarData), 0) == -1)
-                {
-                    perror("Błąd wysyłania auta do mechanika");
-                    release_station(mechanic_id);
-                }
-            }
-            else
-            {
-                printf("    -> [Obsługa %d] Brak wolnych stanowisk dla ID: %d. Klient rezygnuje z czekania.\n", id + 1, msg.data.id);
-            }
-
-            continue;
-        }
-
-        usleep(10000); // Małe opóźnienie, aby nie obciążać CPU
+        signal(SIGTERM, service_sigterm_handler);
     }
-    printf("[Obsługa %d] Zamykam stanowisko nr %d.\n", id + 1, id + 1);
+
+    log_color(ROLE_SERVICE, "Obsługa %d: Meldunek na stanowisku.", staff_id);
+
+    int was_open = -1;  // -1 = nieznany stan początkowy, 0 = zamknięte, 1 = otwarte
+
+    // Stanowisko 1 działa dopóki symulacja trwa
+    // Stanowiska 2 i 3 działają dopóki menedżer ich nie zamknie (SIGTERM)
+    while (shm->simulation_running && (staff_id == 1 || !service_should_exit))
+    {
+        int is_open = (shm->current_hour >= OPEN_HOUR && shm->current_hour < CLOSE_HOUR);
+
+        // Logika otwarcia/zamknięcia stanowiska
+        if (staff_id == 1)
+        {
+            // Przejście z otwartego na zamknięte
+            if (was_open == 1 && !is_open)
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Wybiła godzina %d:00. Zamykam przyjmowanie klientów.", staff_id, CLOSE_HOUR);
+                
+                // Wypchnijęcie wszystkich oczekujących klientów
+                while (safe_msgrcv_nowait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_CLIENT_TO_SERVICE) != -1)
+                {
+                    log_color(ROLE_SERVICE, "Obsługa %d: (ZAMKNIĘCIE) Przepraszam klienta %d, zamykamy.", staff_id, msg.client_pid);
+                    sem_lock(sem_id, SEM_LOG);
+                    shm->clients_in_queue--;
+                    sem_unlock(sem_id, SEM_LOG);
+                    sem_unlock(sem_id, SEM_QUEUE);
+                    msg.mtype = MSG_BASE_TO_CLIENT + msg.client_pid;
+                    msg.decision = 0;
+                    safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+                }
+            }
+            // Przejście z zamkniętego na otwarte
+            else if (was_open == 0 && is_open)
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Godzina %d:00. Otwieram przyjmowanie klientów.", staff_id, OPEN_HOUR);
+            }
+            // Pierwsze uruchomienie
+            else if (was_open == -1 && is_open)
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Serwis otwarty. Rozpoczynam przyjmowanie klientów.", staff_id);
+            }
+        }
+        
+        // Zapamiętanie stanu otwarcia
+        was_open = is_open ? 1 : 0;
+
+        // Priorytetowo obsługujemy mechaników
+        if (staff_id == 1 && safe_msgrcv_nowait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_MECHANIC_TO_SERVICE) != -1)
+        {
+            if (msg.is_extra_repair == 1)
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Mechanik %d -> Klient %d (Usterka dod.).", staff_id, msg.mechanic_id, msg.client_pid);
+                msg.mtype = MSG_BASE_TO_CLIENT + msg.client_pid;
+                safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+
+                // Czekamy na odpowiedź
+                safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_CLIENT_DECISION + msg.client_pid);
+
+                msg.mtype = MSG_BASE_TO_MECHANIC + msg.mechanic_id;
+                safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+            }
+            else
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Auto klienta %d gotowe. Do Kasy.", staff_id, msg.client_pid);
+                msg.mtype = MSG_SERVICE_TO_CASHIER;
+                safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+            }
+            continue;
+        }
+
+        // Następnie obsługujemy klientów, jeśli stanowisko jest otwarte
+        if (is_open && safe_msgrcv_nowait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_CLIENT_TO_SERVICE) != -1)
+        {
+            // Zwolnienie miejsca w kolejce i dekrementacja licznika
+            sem_lock(sem_id, SEM_LOG);
+            shm->clients_in_queue--;
+            sem_unlock(sem_id, SEM_LOG);
+            
+            sem_unlock(sem_id, SEM_QUEUE);
+
+            // Pobranie danych o usłudze
+            int sid = msg.service_id;
+            if (sid < 0 || sid >= NUM_SERVICES)
+                sid = 0;
+            const char *s_name = PRICE_LIST[sid].name;
+
+            log_color(ROLE_SERVICE, "Obsługa %d: Klient %d, Auto: %c, Zgłoszenie: %s", staff_id, msg.client_pid, msg.brand, s_name);
+
+            // Weryfikacja marki
+            const char allowed[] = "AEIOUY";
+            if (strchr(allowed, msg.brand) == NULL)
+            {
+                msg.decision = 0;
+                msg.mtype = MSG_BASE_TO_CLIENT + msg.client_pid;
+                log_color(ROLE_SERVICE, "Obsługa %d: Marka %c nieobsługiwana.", staff_id, msg.brand);
+                safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+                continue;
+            }
+
+            // Wycena
+            int base_cost = PRICE_LIST[sid].base_cost;
+            int variance = (base_cost * 10) / 100;
+            msg.cost = base_cost + (rand() % (variance * 2 + 1)) - variance;
+            msg.duration = PRICE_LIST[sid].base_duration;
+            if (msg.duration > 2)
+                msg.duration += (rand() % 3) - 1;
+
+            msg.decision = 1;
+            msg.mtype = MSG_BASE_TO_CLIENT + msg.client_pid;
+
+            log_color(ROLE_SERVICE, "Obsługa %d: Oferta dla klienta %d: %d PLN, czas %d.", staff_id, msg.client_pid, msg.cost, msg.duration);
+            safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+
+            // Czekaj na decyzję
+            safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_CLIENT_DECISION + msg.client_pid);
+
+            if (msg.decision == 0)
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Klient %d odrzucił koszty.", staff_id, msg.client_pid);
+                continue;
+            }
+
+            // Szukanie mechanika
+            int found = -1;
+            for (int i = NUM_MECHANICS - 1; i >= 0; i--)
+            {
+                // Sprawdzamy czy mechanik wolny
+                if (shm->mechanic_status[i] == 0)
+                {
+                    int is_uy = (msg.brand == 'U' || msg.brand == 'Y');
+                    if (i == 7)
+                    {
+                        if (is_uy)
+                        {
+                            found = i + 1;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        found = i + 1;
+                        break;
+                    }
+                }
+            }
+
+            // Przydzielanie mechanika lub odsyłanie klienta
+            if (found != -1)
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: Przypisano mechanika %d.", staff_id, found);
+                msg.mtype = MSG_BASE_TO_MECHANIC + found;
+                safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+            }
+            else
+            {
+                log_color(ROLE_SERVICE, "Obsługa %d: BRAK WOLNYCH MIEJSC. Odprawiam klienta %d.", staff_id, msg.client_pid);
+                msg.cost = 0;
+                msg.is_extra_repair = 0;  // Ważne: musi być 0, żeby klient wiedział że to finalizacja
+                msg.mtype = MSG_SERVICE_TO_CASHIER;
+                safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
+            }
+        }
+
+        // Krótkie opóźnienie aby nie obciążać CPU
+        custom_usleep(50000); // 50ms
+    }
+
+    // Przy wyjściu
+    if (staff_id > 1)
+    {
+        log_color(ROLE_SERVICE, "Obsługa %d: Zamykam stanowisko na polecenie menedżera.", staff_id);
+    }
+
+    shmdt(shm);
     exit(0);
 }

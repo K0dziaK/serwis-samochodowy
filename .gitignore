@@ -1,2 +1,48 @@
+# Compiled object files
 *.o
-service_app
+*.obj
+
+# Compiled dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled static libraries
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CMake
+cmake-build-debug/
+cmake-build-release/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# Build directories
+build/
+dist/
+bin/
+
+# Dependencies
+*.d
+
+# Core dumps
+core
+core.*
+
+# Temporary files
+*.tmp
+*.bak

@@ -1,152 +1,126 @@
 #include "common.h"
-#include "ipc_utils.h"
-#include "roles.h"
 
-volatile sig_atomic_t speed_mode = 0;   // 0 - normalny, 1 - szybki
-volatile sig_atomic_t closing_mode = 0; // 1 = zamknij po obecnym aucie
+volatile int speed_mode = 0; // 0 - normal, 1 - 50% szybciej
+volatile int close_requested = 0;
+volatile int job_in_progress = 0;
 
-void mechanic_signal_handler(int sig)
+// Handler sygnałów
+void signal_handler(int sig)
 {
     if (sig == SIG_SPEED_UP)
     {
         if (speed_mode == 0)
-        {
-            speed_mode = 1;
-            char buff[] = "\n[SIGNAL] Otrzymano rozkaz przyśpieszenia pracy!\n";
-            write(STDOUT_FILENO, buff, sizeof(buff) - 1);
-        }
-        else
-        {
-            // ignoruj
-        }
+            speed_mode = 1; // Ignoruj kolejne próby
     }
-    else if (sig == SIG_NORMAL_SPEED)
+    else if (sig == SIG_RESTORE_SPEED)
     {
         if (speed_mode == 1)
-        {
-            speed_mode = 0;
-            char buff[] = "\n[SIGNAL] Powrót do normalnego tempa.\n";
-            write(STDOUT_FILENO, buff, sizeof(buff) - 1);
-        }
-        else
-        {
-            // ignoruj
-        }
+            speed_mode = 0; // Tylko jeśli był przyspieszony
     }
     else if (sig == SIG_CLOSE_STATION)
     {
-        closing_mode = 1;
-        char buff[] = "\n[SIGNAL] Rozkaz zamknięcia stanowiska po obecnej naprawie.\n";
-        write(STDOUT_FILENO, buff, sizeof(buff) - 1);
+        close_requested = 1; // Zamknij po zakończeniu obecnego zadania
     }
     else if (sig == SIG_FIRE)
     {
-        char buff[] = "\n[SIGNAL] POŻAR! UCIEKAM!!\n";
-        write(STDERR_FILENO, buff, sizeof(buff) - 1);
-        _exit(0);
+        exit(0); // Natychmiastowe wyjście
     }
 }
 
-void run_mechanic(int id)
+void run_mechanic(int mech_id, int msg_id, int shm_id, int sem_id)
 {
-    CarMessage msg;
-    long my_msg_type = MSG_TYPE_MECHANIC_OFFSET + id;
-    srand(time(NULL) ^ getpid());
+    global_sem_id = sem_id;
+    shared_data *shm = (shared_data *)shmat(shm_id, NULL, 0);
 
-    // Rejestracja sygnałów
+    // Rejestracja PID w pamięci dzielonej
+    shm->mechanics_pids[mech_id - 1] = getpid();
+    shm->mechanic_status[mech_id - 1] = 0; // Wolny
+
+    // Konfiguracja obsługi sygnałów
     struct sigaction sa;
-    sa.sa_handler = mechanic_signal_handler;
+    sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-
     sigaction(SIG_SPEED_UP, &sa, NULL);
-    sigaction(SIG_NORMAL_SPEED, &sa, NULL);
+    sigaction(SIG_RESTORE_SPEED, &sa, NULL);
     sigaction(SIG_CLOSE_STATION, &sa, NULL);
     sigaction(SIG_FIRE, &sa, NULL);
 
-    printf("[Mechanik %d] Obsługuje stanowisko %d.\n", getpid(), id);
+    log_color(ROLE_MECHANIC, "Mechanik %d: Rozpoczynam pracę.", mech_id);
 
-    while (1)
+    msg_buf msg;
+    while (shm->simulation_running)
     {
-        if (closing_mode)
+        if (close_requested && !job_in_progress)
         {
-            printf("[Mechanik %d] Stanowisko zamknięte przez Kierownika. Kończę pracę.\n", id + 1);
+            shm->mechanic_status[mech_id - 1] = 2; // Zamknięte
+            log_color(ROLE_MECHANIC, "Mechanik %d: Stanowisko zamknięte decyzją kierownika.", mech_id);
             break;
         }
 
-        if (msgrcv(msg_queue_id, &msg, sizeof(CarData), my_msg_type, 0) == -1)
+        // Odbieranie zlecenia
+        safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_TO_MECHANIC + mech_id);
+
+        job_in_progress = 1;
+        shm->mechanic_status[mech_id - 1] = 1; // Zajęty
+        log_color(ROLE_MECHANIC, "Mechanik %d: Rozpoczynam naprawę auta marki %c (Klient PID: %d). Czas: %d",
+                   mech_id, msg.brand, msg.client_pid, msg.duration);
+
+        // Symulacja naprawy - Część 1 (50% czasu)
+        int part1 = msg.duration * 1000000 / 2;
+        if (speed_mode)
+            part1 /= 2;
+        custom_usleep(part1 > 0 ? part1 : 1);
+
+        // Losowanie dodatkowej usterki (20% szans)
+        if ((rand() % 100) < CHANCE_EXTRA_REPAIR)
         {
-            if (errno == EINTR)
-                continue;
-            if (errno == EIDRM)
-                break;
-            printf("[Mechanik %d] Błąd msgrcv", id + 1);
-            exit(1);
-        }
+            log_color(ROLE_MECHANIC, "Mechanik %d: Znaleziono dodatkową usterkę (Klient PID: %d). Pytam o zgodę.", mech_id, msg.client_pid);
 
-        printf("    -> [Mechanik %d] Rozpoczynam naprawę auta ID: %d (%s). Czas: %ds. Koszt: %d PLN\n",
-               id + 1,
-               msg.data.id,
-               msg.data.service_name,
-               msg.data.time_est,
-               msg.data.cost);
+            // Pytanie do obsługi, następnie obsługa kontaktuje się z klientem
+            msg.mtype = MSG_MECHANIC_TO_SERVICE;
+            msg.is_extra_repair = 1;
+            msg.mechanic_id = mech_id;
+            safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
 
-        int total_time = msg.data.time_est;
-        if(speed_mode) {
-            total_time /= 2;
-            if(total_time < 1) total_time = 1;
-            printf("    -> [Mechanik %d] Wykonuje przyśpieszoną naprawę!", id + 1);
-        }
+            // Czekanie na decyzję
+            safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_TO_MECHANIC + mech_id);
 
-        int time_left = total_time;
-        while (time_left > 0)
-        {
-            time_left = sleep(time_left);
-        }
-
-        // Losowanie dodatkowej usterki
-        if (rand() % 100 < CHANCE_EXTRA_FAULT)
-        {
-            printf("    -> [Mechanik %d] Znaleziono dodatkową usterkę (ID: %d)! Konsultacja z obsługą.\n", id + 1, msg.data.id);
-
-            int extra_cost = 200 + (rand() % 300);
-            int extra_time = 2 + (rand() % 3);
-
-            CarMessage consult_msg = msg;
-            consult_msg.mtype = MSG_TYPE_CONSULTATION;
-            consult_msg.data.mechanic_pid = getpid();
-            consult_msg.data.mechanic_id = id;
-            consult_msg.data.cost = extra_cost;
-            consult_msg.data.time_est = extra_time;
-
-            // Wysłanie zapytania do obsługi
-            if (msgsnd(msg_queue_id, &consult_msg, sizeof(CarData), 0) != -1)
+            if (msg.decision == 1)
             {
-                // Oczekiwanie na odpowiedź
-                if (msgrcv(msg_queue_id, &consult_msg, sizeof(CarData), getpid(), 0) != -1)
-                {
-                    if (consult_msg.data.extra_accepted)
-                    {
-                        printf("    -> [Mechanik %d] Klient zaakceptował dopłatę (+%d PLN). Kontynuuję naprawę.\n", id + 1, extra_cost);
-                        msg.data.cost += extra_cost;
-                        sleep(extra_time);
-                    }
-                    else
-                    {
-                        printf("    -> [Mechanik %d] Klient odrzucił dopłatę. Naprawiam tylko usterkę podstawową.\n", id + 1);
-                    }
-                }
+                log_color(ROLE_MECHANIC, "Mechanik %d: Klient zgodził się na naprawę. Kontynuuję.", mech_id);
+                // Dodatkowy czas (np. +20%)
+                msg.duration += (msg.duration * 0.2);
+            }
+            else
+            {
+                log_color(ROLE_MECHANIC, "Mechanik %d: Klient odmówił dodatkowej naprawy.", mech_id);
             }
         }
 
-        printf("    -> [Mechanik %d] Koniec naprawy auta ID: %d.\n", id + 1, msg.data.id);
+        // Symulacja naprawy - Część 2
+        int part2 = msg.duration * 1000000 - part1; // Reszta czasu
+        if (speed_mode)
+            part2 /= 2;
+        custom_usleep(part2 > 0 ? part2 : 1);
 
-        release_station(id);
+        // Koniec naprawy
+        log_color(ROLE_MECHANIC, "Mechanik %d: Zakończono naprawę (Klient PID: %d). Przekazuję do obsługi.", mech_id, msg.client_pid);
+        msg.mtype = MSG_MECHANIC_TO_SERVICE;
+        msg.is_extra_repair = 0; // Finalizacja
+        msg.mechanic_id = mech_id;
+        safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
 
-        // Wysłanie informacji do kasy
-        msg.mtype = MSG_TYPE_BILLING;
-        msgsnd(msg_queue_id, &msg, sizeof(CarData), 0);
+        job_in_progress = 0;
+        shm->mechanic_status[mech_id - 1] = 0; // Wolny
+
+        if (close_requested)
+        {
+            shm->mechanic_status[mech_id - 1] = 2;
+            log_color(ROLE_MECHANIC, "Mechanik %d: Zamykam stanowisko po zleceniu.", mech_id);
+            break;
+        }
     }
-    
+    shmdt(shm);
     exit(0);
 }
