@@ -4,6 +4,7 @@
 
 **Autor:** Martin Paszow (nr. albumu 155209)  
 **Repozytorium:** [https://github.com/K0dziaK/serwis-samochodowy](https://github.com/K0dziaK/serwis-samochodowy)
+**Środowisko Testowe:** Ubuntu
 
 ---
 
