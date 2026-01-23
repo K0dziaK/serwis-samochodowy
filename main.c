@@ -96,7 +96,7 @@ int main()
 
     // Inicjalizacja semaforów
     semctl(sem_id, SEM_LOG, SETVAL, 1);
-    semctl(sem_id, SEM_PROC_LIMIT, SETVAL, 100);
+    semctl(sem_id, SEM_PROC_LIMIT, SETVAL, 5000);
     semctl(sem_id, SEM_QUEUE, SETVAL, 20);
 
     // Inicjalizacja pliku raportu
@@ -198,14 +198,23 @@ int main()
 
         // Sprawdzamy czy któryś proces nie umarł (np. przez panic)
         int status;
-        pid_t dead_pid = waitpid(-1, &status, WNOHANG);
-        if (dead_pid > 0)
+        pid_t dead_pid;
+        while ((dead_pid = waitpid(-1, &status, WNOHANG)) > 0)
         {
             // Jeśli proces umarł z błędem (nie 0), kończymy wszystko
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
             {
                 printf("\n" COLOR_RED "[MAIN]" COLOR_RESET " Wykryto awarię procesu potomnego PID %d. Kod wyjścia: %d\n", dead_pid, WEXITSTATUS(status));
-                shm->simulation_running = 0; // Przerwij pętlę
+                shm->simulation_running = 0; // Przerwij symulację
+            }
+            else if (WIFSIGNALED(status))
+            {
+                // Proces został zabity sygnałem - logujemy ale nie przerywamy
+                int sig = WTERMSIG(status);
+                if (sig != SIGTERM && sig != SIGKILL)
+                {
+                    printf("\n" COLOR_YELLOW "[MAIN]" COLOR_RESET " Proces PID %d zakończony sygnałem %d\n", dead_pid, sig);
+                }
             }
         }
     }

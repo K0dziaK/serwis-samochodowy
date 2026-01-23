@@ -2,8 +2,21 @@
 
 #define CLIENT_EXEC_PATH "./client"
 
+void sigchld_handler(int sig)
+{
+    (void)sig;
+    // Obsługuje wszystkie zakończone procesy potomne
+    while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
 void run_generator(int msg_id, int shm_id, int sem_id)
 {
+    struct sigaction sa;
+    sa.sa_handler = sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+    sigaction(SIGCHLD, &sa, NULL);
+
     shared_data *shm = (shared_data *)safe_shmat(shm_id, NULL, 0);
 
     // Przygotowanie argumentów dla exec
