@@ -1,5 +1,6 @@
 #include "common.h"
 
+volatile int local_mech_id = -1;
 volatile int speed_mode = 0; // 0 - normal, 1 - 50% szybciej
 volatile int close_requested = 0;
 volatile int job_in_progress = 0;
@@ -10,16 +11,23 @@ void signal_handler(int sig)
     if (sig == SIG_SPEED_UP)
     {
         if (speed_mode == 0)
+        {
             speed_mode = 1; // Ignoruj kolejne próby
+            log_color(ROLE_MECHANIC, "Mechanik %d: Zostalem przyśpieszony.", local_mech_id);
+        }
     }
     else if (sig == SIG_RESTORE_SPEED)
     {
         if (speed_mode == 1)
+        {
             speed_mode = 0; // Tylko jeśli był przyspieszony
+            log_color(ROLE_MECHANIC, "Mechanik %d: Zostałem przywrócony do normalnego tempa.", local_mech_id);
+        }
     }
     else if (sig == SIG_CLOSE_STATION)
     {
         close_requested = 1; // Zamknij po zakończeniu obecnego zadania
+        log_color(ROLE_MECHANIC, "Mechanik %d: Otrzymałem polecenie zamknięcia stanowiska.", local_mech_id)
     }
     else if (sig == SIG_FIRE)
     {
@@ -29,6 +37,7 @@ void signal_handler(int sig)
 
 void run_mechanic(int mech_id, int msg_id, int shm_id, int sem_id)
 {
+    local_mech_id = mech_id;
     global_sem_id = sem_id;
     shared_data *shm = (shared_data *)shmat(shm_id, NULL, 0);
 
