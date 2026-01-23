@@ -155,7 +155,7 @@ Klient → Kolejka MSG → Obsługa → Przypisanie do Mechanika → Naprawa →
 
 ### Test 7: Działanie programu bez sleepów
 **Cel:** Sprawdzenie czy program nie zawiesi się pod dużym obciążeniem.
-**Procedura:** Odkomentowanie [#define TESTING_NO_SLEEP](https://github.com/K0dziaK/serwis-samochodowy/blob/main/common.h#L5)
+**Procedura:** Odkomentowanie [#define TESTING_NO_SLEEP](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.h#L5)
 **Oczekiwany rezultat:** Program działa przez dłuższy czas.
 **Status:** ✅
 
@@ -164,37 +164,37 @@ Klient → Kolejka MSG → Obsługa → Przypisanie do Mechanika → Naprawa →
 ## 7. Linki do istotnych fragmentów kodu
 
 ### a) Tworzenie i obsługa plików
-- [`fopen()`, `fprintf()`, `fclose()` - logowanie do raport.txt](https://github.com/K0dziaK/serwis-samochodowy/blob/main/common.c#L55-L73)
+- [`fopen()`, `fprintf()`, `fclose()` - logowanie do raport.txt](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L55-L73)
 
 ### b) Tworzenie procesów
-- [`fork()` - tworzenie procesów mechaników](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L118-L130)
-- [`execl()` - uruchamianie programów ról](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L125)
-- [`exit()` - zakończenie procesu](https://github.com/K0dziaK/serwis-samochodowy/blob/main/role_client.c#L22)
-- [`wait()/waitpid()` - oczekiwanie na procesy potomne](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L196-L203)
+- [`fork()` - tworzenie procesów mechaników](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L118-L130)
+- [`execl()` - uruchamianie programów ról](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L125)
+- [`exit()` - zakończenie procesu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_client.c#L22)
+- [`wait()/waitpid()` - oczekiwanie na procesy potomne](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L196-L203)
 
 ### c) Obsługa sygnałów
-- [`signal()` - ustawienie handlerów](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L66-L68)
-- [`sigaction()` - zaawansowana obsługa sygnałów mechanika](https://github.com/K0dziaK/serwis-samochodowy/blob/main/role_mechanic.c#L38-L46)
-- [`kill()` - wysyłanie sygnałów do procesów](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L20-L22)
-- [`raise()` - wysłanie sygnału do siebie](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L51)
+- [`signal()` - ustawienie handlerów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L66-L68)
+- [`sigaction()` - zaawansowana obsługa sygnałów mechanika](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_mechanic.c#L38-L46)
+- [`kill()` - wysyłanie sygnałów do procesów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L20-L22)
+- [`raise()` - wysłanie sygnału do siebie](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L51)
 
 ### d) Synchronizacja procesów (semafory)
-- [`ftok()` - generowanie klucza IPC](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L72-L74)
-- [`semget()` - tworzenie zestawu semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L78)
-- [`semctl()` - inicjalizacja semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L93-L95)
-- [`semop()` - operacje na semaforach (lock/unlock)](https://github.com/K0dziaK/serwis-samochodowy/blob/main/common.c#L170-L178)
+- [`ftok()` - generowanie klucza IPC](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L72-L74)
+- [`semget()` - tworzenie zestawu semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L78)
+- [`semctl()` - inicjalizacja semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L93-L95)
+- [`semop()` - operacje na semaforach (lock/unlock)](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L170-L178)
 
 ### e) Segmenty pamięci dzielonej
-- [`shmget()` - tworzenie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L77)
-- [`shmat()` - dołączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L81)
-- [`shmdt()` - odłączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/main/role_mechanic.c#L116)
-- [`shmctl()` - usuwanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L27)
+- [`shmget()` - tworzenie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L77)
+- [`shmat()` - dołączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L81)
+- [`shmdt()` - odłączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_mechanic.c#L116)
+- [`shmctl()` - usuwanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L27)
 
 ### f) Kolejki komunikatów
-- [`msgget()` - tworzenie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L76)
-- [`msgsnd()` - wysyłanie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/main/common.c#L119-L129)
-- [`msgrcv()` - odbieranie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/main/common.c#L131-L167)
-- [`msgctl()` - usuwanie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/main/main.c#L26)
+- [`msgget()` - tworzenie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L76)
+- [`msgsnd()` - wysyłanie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L119-L129)
+- [`msgrcv()` - odbieranie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L131-L167)
+- [`msgctl()` - usuwanie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L26)
 
 ---
 
