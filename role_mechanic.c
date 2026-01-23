@@ -27,7 +27,7 @@ void signal_handler(int sig)
     else if (sig == SIG_CLOSE_STATION)
     {
         close_requested = 1; // Zamknij po zakończeniu obecnego zadania
-        log_color(ROLE_MECHANIC, "Mechanik %d: Otrzymałem polecenie zamknięcia stanowiska.", local_mech_id)
+        log_color(ROLE_MECHANIC, "Mechanik %d: Otrzymałem polecenie zamknięcia stanowiska.", local_mech_id);
     }
     else if (sig == SIG_FIRE)
     {
