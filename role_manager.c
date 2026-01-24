@@ -21,6 +21,9 @@ void run_manager(int shm_id, int sem_id, int msg_id)
 {
     global_sem_id = sem_id;
     shared_data *shm = (shared_data *)safe_shmat(shm_id, NULL, 0);
+    
+    // Zapamiętanie start_time
+    time_t start_time = shm->start_time;
 
     // Przygotowanie argumentów (stringi) dla exec
     char msg_id_str[16], shm_id_str[16], sem_id_str[16];
@@ -86,9 +89,12 @@ void run_manager(int shm_id, int sem_id, int msg_id)
             }
         }
 
+        // Obliczenie aktualnego czasu symulacji
+        sim_time st = get_simulation_time(start_time);
+        
         // Zarządzanie stanowiskami obsługi na podstawie długości kolejki
         int q = shm->clients_in_queue;
-        int is_open_time = (shm->current_hour >= OPEN_HOUR && shm->current_hour < CLOSE_HOUR);
+        int is_open_time = (st.hour >= OPEN_HOUR && st.hour < CLOSE_HOUR);
 
         // Stanowisko 2
         if (shm->service_pids[1] == 0 && q > K1 && is_open_time)

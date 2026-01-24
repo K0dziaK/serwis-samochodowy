@@ -46,3 +46,14 @@ core.*
 # Temporary files
 *.tmp
 *.bak
+
+# Compiled files
+cashier
+client
+generator
+manager
+mechanic
+service
+simulation
+
+raport.txt

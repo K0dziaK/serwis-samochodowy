@@ -14,6 +14,9 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
     global_sem_id = sem_id;
     shared_data *shm = (shared_data *)safe_shmat(shm_id, NULL, 0);
     msg_buf msg;
+    
+    // Zapamiętanie start_time
+    time_t start_time = shm->start_time;
 
     // Stanowiska 2 i 3 reagują na SIGTERM od menedżera
     if (staff_id > 1)
@@ -29,7 +32,9 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
     // Stanowiska 2 i 3 działają dopóki menedżer ich nie zamknie (SIGTERM)
     while (shm->simulation_running && (staff_id == 1 || !service_should_exit))
     {
-        int is_open = (shm->current_hour >= OPEN_HOUR && shm->current_hour < CLOSE_HOUR);
+        // Obliczenie aktualnego czasu symulacji
+        sim_time st = get_simulation_time(start_time);
+        int is_open = (st.hour >= OPEN_HOUR && st.hour < CLOSE_HOUR);
 
         // Logika otwarcia/zamknięcia stanowiska
         if (staff_id == 1)
@@ -76,7 +81,7 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
                 msg.mtype = MSG_BASE_TO_CLIENT + msg.client_pid;
                 safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
 
-                // Czekamy na odpowiedź
+                // Czekanie na decyzję klienta
                 safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_CLIENT_DECISION + msg.client_pid);
 
                 msg.mtype = MSG_BASE_TO_MECHANIC + msg.mechanic_id;
@@ -91,7 +96,7 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
             continue;
         }
 
-        // Następnie obsługujemy klientów, jeśli stanowisko jest otwarte
+        // Obsługa klientów tylko jeśli stanowisko jest otwarte
         if (is_open && safe_msgrcv_nowait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_CLIENT_TO_SERVICE) != -1)
         {
             // Zwolnienie miejsca w kolejce i dekrementacja licznika
@@ -134,7 +139,7 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
             log_color(ROLE_SERVICE, "Obsługa %d: Oferta dla klienta %d: %d PLN, czas %d.", staff_id, msg.client_pid, msg.cost, msg.duration);
             safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
 
-            // Czekaj na decyzję
+            // Czekanie na decyzję
             safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_CLIENT_DECISION + msg.client_pid);
 
             if (msg.decision == 0)
@@ -147,7 +152,7 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
             int found = -1;
             for (int i = NUM_MECHANICS - 1; i >= 0; i--)
             {
-                // Sprawdzamy czy mechanik wolny
+                // Sprawdzenie czy mechanik wolny
                 if (shm->mechanic_status[i] == 0)
                 {
                     int is_uy = (msg.brand == 'U' || msg.brand == 'Y');
@@ -178,7 +183,7 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
             {
                 log_color(ROLE_SERVICE, "Obsługa %d: BRAK WOLNYCH MIEJSC. Odprawiam klienta %d.", staff_id, msg.client_pid);
                 msg.cost = 0;
-                msg.is_extra_repair = 0;  // Ważne: musi być 0, żeby klient wiedział że to finalizacja
+                msg.is_extra_repair = 0; // 0 oznacza odprawienie klienta
                 msg.mtype = MSG_SERVICE_TO_CASHIER;
                 safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
             }

@@ -32,6 +32,9 @@ void run_client(int msg_id, int shm_id, int sem_id)
     srand(getpid());
     global_sem_id = sem_id;
     shared_data *shm = (shared_data *)safe_shmat(shm_id, NULL, 0);
+    
+    // Zapamiętanie start_time
+    time_t start_time = shm->start_time;
 
     // Losowanie marki
     char brands[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -43,14 +46,15 @@ void run_client(int msg_id, int shm_id, int sem_id)
     // Sprawdzenie krytyczności na podstawie cennika
     int is_critical = PRICE_LIST[s_id].is_critical;
 
-    // Sprawdzenie godzin otwarcia
-    int open = (shm->current_hour >= OPEN_HOUR && shm->current_hour < CLOSE_HOUR);
+    // Obliczenie aktualnego czasu symulacji
+    sim_time st = get_simulation_time(start_time);
+    int open = (st.hour >= OPEN_HOUR && st.hour < CLOSE_HOUR);
 
     // Decyzja o wejściu do kolejki
     if (!open)
     {
         // Jeśli naprawa nie jest krytyczna i do otwarcia zostało dużo czasu (> 1h) -> odjazd
-        int hours_to_open = (OPEN_HOUR - shm->current_hour);
+        int hours_to_open = (OPEN_HOUR - st.hour);
         if (hours_to_open < 0)
             hours_to_open += 24; // następny dzień
 

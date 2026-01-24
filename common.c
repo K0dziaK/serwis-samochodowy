@@ -254,3 +254,26 @@ void custom_usleep(unsigned int usec)
     usleep(usec);
 #endif
 }
+
+// Oblicza czas symulacji na podstawie rzeczywistego upływu czasu
+sim_time get_simulation_time(time_t start_time)
+{
+    sim_time st;
+    time_t now = time(NULL);
+    double seconds_elapsed = difftime(now, start_time);
+    
+    // Przeliczenie na minuty symulacji
+    long total_sim_minutes = (long)(seconds_elapsed * SIM_MINUTES_PER_REAL_SEC);
+    
+    // Godzina startowa symulacji to 7:00
+    int start_hour = 7;
+    long total_minutes_from_start = start_hour * 60 + total_sim_minutes;
+    
+    // Obliczenie dnia, godziny i minuty
+    st.day = total_minutes_from_start / (24 * 60);
+    int minutes_in_day = total_minutes_from_start % (24 * 60);
+    st.hour = minutes_in_day / 60;
+    st.minute = minutes_in_day % 60;
+    
+    return st;
+}

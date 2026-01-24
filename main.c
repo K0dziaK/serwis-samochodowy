@@ -87,7 +87,6 @@ int main()
     // Ustawienia początkowe
     shm->simulation_running = 1;
     shm->start_time = time(NULL);
-    shm->current_hour = 7;
 
     // Inicjalizacja Pamięci PID-ów obsługi (0 = brak procesu)
     shm->service_pids[0] = 0; // zostanie ustawione zaraz
@@ -181,35 +180,29 @@ int main()
     {
         custom_usleep(1000000);
 
-        // Aktualizacja czasu symulacji,
-        // oparta na czasie rzeczywistym od startu
-        // jest to rozwiązanie optymalne.
-        time_t now = time(NULL);
-        double seconds_elapsed = difftime(now, shm->start_time);
-        long total_sim_minutes = (long)(seconds_elapsed * SIM_MINUTES_PER_REAL_SEC);
-        int total_hours = 7 + (total_sim_minutes / 60);
-        shm->current_hour = total_hours % 24;
-        shm->current_minute = total_sim_minutes % 60;
-        int current_day = total_hours / 24;
+        // Obliczenie czasu symulacji na podstawie upływu czasu
+        // Funkcja get_simulation_time() oblicza czas na bieżąco,
+        // dzięki czemu po wznowieniu (SIGCONT) czas jest poprawny.
+        sim_time st = get_simulation_time(shm->start_time);
 
         printf("\r" COLOR_CYAN "[MAIN]" COLOR_RESET " Dzień %d | Czas symulacji: " COLOR_WHITE "%02d:%02d" COLOR_RESET " | Klienci w kolejce: " COLOR_YELLOW "%d" COLOR_RESET " ",
-               current_day + 1, shm->current_hour, shm->current_minute, shm->clients_in_queue);
+               st.day + 1, st.hour, st.minute, shm->clients_in_queue);
         fflush(stdout);
 
-        // Sprawdzamy czy któryś proces nie umarł (np. przez panic)
+        // Sprawdzenie czy któryś proces nie umarł (np. przez panic)
         int status;
         pid_t dead_pid;
         while ((dead_pid = waitpid(-1, &status, WNOHANG)) > 0)
         {
-            // Jeśli proces umarł z błędem (nie 0), kończymy wszystko
+            // Jeśli proces umarł z błędem (nie 0), kończenie wszystkiego
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
             {
                 printf("\n" COLOR_RED "[MAIN]" COLOR_RESET " Wykryto awarię procesu potomnego PID %d. Kod wyjścia: %d\n", dead_pid, WEXITSTATUS(status));
-                shm->simulation_running = 0; // Przerwij symulację
+                shm->simulation_running = 0; // Przerwanie symulacji
             }
             else if (WIFSIGNALED(status))
             {
-                // Proces został zabity sygnałem - logujemy ale nie przerywamy
+                // Proces został zabity sygnałem - logowanie
                 int sig = WTERMSIG(status);
                 if (sig != SIGTERM && sig != SIGKILL)
                 {

@@ -105,8 +105,6 @@ typedef struct {
 // Struktura danych współdzielonych
 typedef struct {
     time_t start_time;
-    int current_hour;
-    int current_minute;
     int simulation_running;
     int clients_in_queue;
     pid_t mechanics_pids[NUM_MECHANICS];
@@ -128,6 +126,16 @@ typedef struct {
 
 // Globalne ID semafora (ustawiane w każdym procesie)
 extern int global_sem_id;
+
+// Struktura przechowująca czas symulacji
+typedef struct {
+    int day;       // Dzień symulacji (0-based)
+    int hour;      // Godzina (0-23)
+    int minute;    // Minuta (0-59)
+} sim_time;
+
+// Funkcja obliczająca czas symulacji na podstawie start_time
+sim_time get_simulation_time(time_t start_time);
 
 // Funkcje bezpiecznych wrapperów IPC
 void panic(const char* msg);
