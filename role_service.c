@@ -228,7 +228,8 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
                 log_color(ROLE_SERVICE, "Obsługa %d: BRAK WOLNYCH MIEJSC. Odprawiam klienta %d.", staff_id, msg.client_pid);
                 msg.cost = 0;
                 msg.is_extra_repair = 0;
-                msg.mtype = MSG_SERVICE_TO_CASHIER;
+                msg.decision = -1;  // Specjalna flaga: odprawiony bez naprawy
+                msg.mtype = MSG_BASE_TO_CLIENT + msg.client_pid;
                 safe_msgsnd(msg_id, &msg, sizeof(msg_buf) - sizeof(long), 0);
             }
         }

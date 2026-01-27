@@ -122,7 +122,12 @@ void run_client(int msg_id, int shm_id, int sem_id)
         if (safe_msgrcv_wait(msg_id, &msg, sizeof(msg_buf) - sizeof(long), MSG_BASE_TO_CLIENT + getpid()) == -1)
             break;
 
-        if (msg.is_extra_repair)
+        // Sprawdzenie czy klient został odprawiony bez naprawy (brak mechaników)
+        if (msg.decision == -1)
+        {
+            client_exit(sem_id, shm, 0, 1);
+        }
+        else if (msg.is_extra_repair)
         {
             // Decyzja o dodatkowej naprawie (szansa odmowy określona w common.h)
             if ((rand() % 100) < CHANCE_EXTRA_REPAIR_REFUSAL)
