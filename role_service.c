@@ -41,7 +41,7 @@ void run_service(int staff_id, int msg_id, int shm_id, int sem_id)
     int was_open = -1;
     
     // Flaga: czy klienci zostali już wyrzuceni po zamknięciu (resetowana przy otwarciu)
-    int clients_dismissed_today = 0;
+    int clients_dismissed_today = 1;
 
     // Główna pętla pracy stanowiska
     // Stanowisko 1 - stałe (działa do końca symulacji)
