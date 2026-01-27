@@ -222,6 +222,22 @@ int main()
         pid_t dead_pid;
         while ((dead_pid = waitpid(-1, &status, WNOHANG)) > 0)
         {
+            // Sprawdź czy to jest jeden z naszych kluczowych procesów
+            int is_critical = 0;
+            for (int i = 0; i < pid_count; i++)
+            {
+                if (pids[i] == dead_pid)
+                {
+                    is_critical = 1;
+                    pids[i] = 0; // Oznacz jako nieaktywny
+                    break;
+                }
+            }
+
+            // Jeśli to nie jest nasz proces (np. proces klienta), pomijamy
+            if (!is_critical)
+                continue;
+
             // Jeśli proces zakończył się z błędem (kod wyjścia != 0)
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
             {
@@ -230,12 +246,18 @@ int main()
             }
             else if (WIFSIGNALED(status))
             {
-                // Proces został zabity sygnałem - logowanie (pomijamy SIGTERM/SIGKILL)
+                // Proces kluczowy został zabity sygnałem - nieautoryzowane zakończenie
                 int sig = WTERMSIG(status);
-                if (sig != SIGTERM && sig != SIGKILL)
-                {
-                    printf("\n" COLOR_YELLOW "[MAIN]" COLOR_RESET " Proces PID %d zakończony sygnałem %d\n", dead_pid, sig);
-                }
+                printf("\n" COLOR_RED "[MAIN]" COLOR_RESET " Wykryto nieautoryzowane zabicie procesu PID %d sygnałem %d (%s)\n", 
+                       dead_pid, sig, strsignal(sig));
+                printf(COLOR_RED "[MAIN]" COLOR_RESET " Kończenie symulacji z powodu nieautoryzowanego zakończenia procesu...\n");
+                shm->simulation_running = 0; // Przerwanie symulacji
+            }
+            else if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+            {
+                // Proces kluczowy zakończył się normalnie - to też nie powinno się zdarzyć
+                printf("\n" COLOR_RED "[MAIN]" COLOR_RESET " Proces kluczowy PID %d zakończył się nieoczekiwanie (kod 0)\n", dead_pid);
+                shm->simulation_running = 0; // Przerwanie symulacji
             }
         }
     }
