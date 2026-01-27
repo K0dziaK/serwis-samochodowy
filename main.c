@@ -7,6 +7,9 @@ int msg_id, shm_id, sem_id;
 pid_t pids[100];
 int pid_count = 0;
 
+// Wskaźnik do pamięci dzielonej (dla handlerów sygnałów)
+shared_data *global_shm = NULL;
+
 // Ścieżki do programów wykonywalnych
 #define MECHANIC_EXEC_PATH "./mechanic"
 #define SERVICE_EXEC_PATH "./service"
@@ -65,8 +68,22 @@ void sigtstp_handler(int sig)
 {
     (void)sig;
     printf("\n\n" COLOR_ORANGE ">>>" COLOR_RESET " [MAIN] WSTRZYMANIE (CTRL+Z) " COLOR_ORANGE "<<<" COLOR_RESET "\n");
+    
+    // Zatrzymanie procesów uruchomionych przez main
     for (int i = 0; i < pid_count; i++)
-        kill(pids[i], SIGSTOP);
+        if (pids[i] > 0)
+            kill(pids[i], SIGSTOP);
+    
+    // Zatrzymanie dynamicznych stanowisk obsługi (2 i 3) uruchomionych przez menedżera
+    if (global_shm != NULL)
+    {
+        for (int i = 1; i < NUM_SERVICE_STAFF; i++)
+        {
+            if (global_shm->service_pids[i] > 0)
+                kill(global_shm->service_pids[i], SIGSTOP);
+        }
+    }
+    
     signal(SIGTSTP, SIG_DFL);
     raise(SIGTSTP);
 }
@@ -78,8 +95,21 @@ void sigcont_handler(int sig)
     (void)sig;
     signal(SIGTSTP, sigtstp_handler);
     printf(COLOR_GREEN ">>>" COLOR_RESET " [MAIN] WZNOWIENIE " COLOR_GREEN "<<<" COLOR_RESET "\n\n");
+    
+    // Wznowienie procesów uruchomionych przez main
     for (int i = 0; i < pid_count; i++)
-        kill(pids[i], SIGCONT);
+        if (pids[i] > 0)
+            kill(pids[i], SIGCONT);
+    
+    // Wznowienie dynamicznych stanowisk obsługi (2 i 3) uruchomionych przez menedżera
+    if (global_shm != NULL)
+    {
+        for (int i = 1; i < NUM_SERVICE_STAFF; i++)
+        {
+            if (global_shm->service_pids[i] > 0)
+                kill(global_shm->service_pids[i], SIGCONT);
+        }
+    }
 }
 
 int main()
@@ -103,6 +133,7 @@ int main()
 
     // Inicjalizacja pamięci dzielonej
     shared_data *shm = (shared_data *)safe_shmat(shm_id, NULL, 0);
+    global_shm = shm; // Ustawienie globalnego wskaźnika dla handlerów sygnałów
     memset(shm, 0, sizeof(shared_data));
 
     // Ustawienia początkowe
