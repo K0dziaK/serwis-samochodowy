@@ -1,33 +1,44 @@
 #include "common.h"
 
+// Identyfikatory zasobów IPC
 int msg_id, shm_id, sem_id;
+
+// Tablica PID-ów procesów potomnych
 pid_t pids[100];
 int pid_count = 0;
 
 // Ścieżki do programów wykonywalnych
-#define MECHANIC_EXEC_PATH  "./mechanic"
-#define SERVICE_EXEC_PATH   "./service"
-#define CASHIER_EXEC_PATH   "./cashier"
-#define MANAGER_EXEC_PATH   "./manager"
+#define MECHANIC_EXEC_PATH "./mechanic"
+#define SERVICE_EXEC_PATH "./service"
+#define CASHIER_EXEC_PATH "./cashier"
+#define MANAGER_EXEC_PATH "./manager"
 #define GENERATOR_EXEC_PATH "./generator"
 
+// Funkcja sprzątająca zasoby przy zakończeniu symulacji
+// Wysyła SIGTERM do wszystkich procesów potomnych i zwalnia zasoby IPC
 void cleanup()
 {
     printf("\n" COLOR_YELLOW "[MAIN]" COLOR_RESET " Zamykanie symulacji...\n");
+
+    // Wysyłanie SIGTERM do wszystkich procesów potomnych
     for (int i = 0; i < pid_count; i++)
     {
         if (pids[i] > 0)
             kill(pids[i], SIGTERM);
     }
-    // Chwila dla menedżera na zabicie jego dzieci
-    custom_usleep(1000000);
 
+    // Chwila dla menedżera na zamknięcie swoich procesów
+    usleep(500000);
+
+    // Usuwanie zasobów IPC (kolejka komunikatów, pamięć dzielona, semafory)
     msgctl(msg_id, IPC_RMID, NULL);
     shmctl(shm_id, IPC_RMID, NULL);
     semctl(sem_id, 0, IPC_RMID);
     printf(COLOR_GREEN "[MAIN]" COLOR_RESET " Zasoby zwolnione. Koniec.\n");
 }
 
+// Resetowanie handlerów sygnałów dla procesów potomnych
+// Procesy potomne ignorują SIGTSTP (są zatrzymywane przez SIGSTOP z procesu głównego)
 void reset_child_signals()
 {
     signal(SIGTSTP, SIG_IGN);
@@ -35,6 +46,8 @@ void reset_child_signals()
     signal(SIGCONT, SIG_DFL);
 }
 
+// Handler SIGINT (Ctrl+C) - zamknięcie symulacji
+// Wywoływany gdy użytkownik naciśnie Ctrl+C
 void sigint_handler(int sig)
 {
     (void)sig;
@@ -42,6 +55,12 @@ void sigint_handler(int sig)
     exit(0);
 }
 
+// Deklaracja funkcji do ustawienia handlerów
+void setup_signal_handlers(void);
+
+// Handler SIGTSTP (Ctrl+Z) - wstrzymanie symulacji
+// Zatrzymuje wszystkie procesy potomne za pomocą SIGSTOP,
+// a następnie zatrzymuje siebie
 void sigtstp_handler(int sig)
 {
     (void)sig;
@@ -52,6 +71,8 @@ void sigtstp_handler(int sig)
     raise(SIGTSTP);
 }
 
+// Handler SIGCONT - wznowienie symulacji
+// Wywoływany automatycznie gdy proces jest wznawiany (przez fg lub kill -CONT)
 void sigcont_handler(int sig)
 {
     (void)sig;
@@ -96,7 +117,8 @@ int main()
     // Inicjalizacja semaforów
     semctl(sem_id, SEM_LOG, SETVAL, 1);
     semctl(sem_id, SEM_PROC_LIMIT, SETVAL, 5000);
-    semctl(sem_id, SEM_QUEUE, SETVAL, 20);
+    semctl(sem_id, SEM_QUEUE, SETVAL, 100);
+    semctl(sem_id, SEM_MECHANIC_ASSIGN, SETVAL, 1); // Semafor binarny dla przypisywania mechaników
 
     // Inicjalizacja pliku raportu
     FILE *f = fopen("raport.txt", "w");
@@ -117,7 +139,7 @@ int main()
     {
         char id_str[16];
         snprintf(id_str, sizeof(id_str), "%d", i);
-        
+
         pid_t p = safe_fork();
         if (p == 0)
         {
@@ -175,26 +197,32 @@ int main()
     pids[pid_count++] = pm;
 
     printf(COLOR_GREEN "Symulacja działa." COLOR_RESET "\n");
+    printf(COLOR_GRAY "[INFO]" COLOR_RESET " CTRL+C = zakończ | CTRL+Z = wstrzymaj | fg = wznów\n\n");
 
+    // Główna pętla symulacji - wyświetlanie statusu i monitorowanie procesów
     while (shm->simulation_running)
     {
+        // Opóźnienie 1 sekundy między aktualizacjami statusu
         custom_usleep(1000000);
 
-        // Obliczenie czasu symulacji na podstawie upływu czasu
+        // Obliczenie czasu symulacji na podstawie upływu czasu rzeczywistego
         // Funkcja get_simulation_time() oblicza czas na bieżąco,
-        // dzięki czemu po wznowieniu (SIGCONT) czas jest poprawny.
+        // dzięki czemu po wznowieniu (SIGCONT) czas jest poprawny
         sim_time st = get_simulation_time(shm->start_time);
+        int open = (st.hour >= OPEN_HOUR && st.hour < CLOSE_HOUR);
 
-        printf("\r" COLOR_CYAN "[MAIN]" COLOR_RESET " Dzień %d | Czas symulacji: " COLOR_WHITE "%02d:%02d" COLOR_RESET " | Klienci w kolejce: " COLOR_YELLOW "%d" COLOR_RESET " ",
-               st.day + 1, st.hour, st.minute, shm->clients_in_queue);
+        printf("\r" COLOR_CYAN "[MAIN]" COLOR_RESET " Dzień %d | Czas symulacji: " COLOR_WHITE "%02d:%02d" COLOR_RESET "%s" COLOR_RESET " | Klienci w kolejce: " COLOR_YELLOW "%d" COLOR_RESET " \n",
+               st.day + 1, st.hour, st.minute,
+               (open ? COLOR_GREEN " (OTWARTE)" : COLOR_RED " (ZAMKNIĘTE)"),
+               shm->clients_in_queue);
         fflush(stdout);
 
-        // Sprawdzenie czy któryś proces nie umarł (np. przez panic)
+        // Sprawdzenie czy któryś proces potomny nie zakończył się nieoczekiwanie
         int status;
         pid_t dead_pid;
         while ((dead_pid = waitpid(-1, &status, WNOHANG)) > 0)
         {
-            // Jeśli proces umarł z błędem (nie 0), kończenie wszystkiego
+            // Jeśli proces zakończył się z błędem (kod wyjścia != 0)
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
             {
                 printf("\n" COLOR_RED "[MAIN]" COLOR_RESET " Wykryto awarię procesu potomnego PID %d. Kod wyjścia: %d\n", dead_pid, WEXITSTATUS(status));
@@ -202,7 +230,7 @@ int main()
             }
             else if (WIFSIGNALED(status))
             {
-                // Proces został zabity sygnałem - logowanie
+                // Proces został zabity sygnałem - logowanie (pomijamy SIGTERM/SIGKILL)
                 int sig = WTERMSIG(status);
                 if (sig != SIGTERM && sig != SIGKILL)
                 {

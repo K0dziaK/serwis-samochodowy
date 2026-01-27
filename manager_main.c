@@ -2,6 +2,7 @@
 
 void run_manager(int shm_id, int sem_id, int msg_id);
 
+// Punkt wejścia programu menedżera
 int main(int argc, char *argv[])
 {
     if (argc != 4)

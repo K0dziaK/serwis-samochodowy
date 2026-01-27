@@ -2,6 +2,7 @@
 
 void run_mechanic(int id, int msg_id, int shm_id, int sem_id);
 
+// Punkt wejścia programu mechanika
 int main(int argc, char *argv[])
 {
     if (argc != 5)

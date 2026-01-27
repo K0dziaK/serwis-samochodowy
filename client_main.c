@@ -2,6 +2,7 @@
 
 void run_client(int msg_id, int shm_id, int sem_id);
 
+// Punkt wejścia programu klienta
 int main(int argc, char *argv[])
 {
     if (argc != 4)
