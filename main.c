@@ -67,7 +67,6 @@ void setup_signal_handlers(void);
 void sigtstp_handler(int sig)
 {
     (void)sig;
-    printf("\n\n" COLOR_ORANGE ">>>" COLOR_RESET " [MAIN] WSTRZYMANIE (CTRL+Z) " COLOR_ORANGE "<<<" COLOR_RESET "\n");
     
     // Zatrzymanie procesów uruchomionych przez main
     for (int i = 0; i < pid_count; i++)
@@ -83,6 +82,7 @@ void sigtstp_handler(int sig)
                 kill(global_shm->service_pids[i], SIGSTOP);
         }
     }
+    printf("\n\n" COLOR_ORANGE ">>>" COLOR_RESET " [MAIN] WSTRZYMANIE (CTRL+Z) " COLOR_ORANGE "<<<" COLOR_RESET "\n");
     
     signal(SIGTSTP, SIG_DFL);
     raise(SIGTSTP);
