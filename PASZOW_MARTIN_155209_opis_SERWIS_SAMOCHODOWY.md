@@ -106,15 +106,15 @@ Klient → Kolejka MSG → Obsługa → Przypisanie do Mechanika → Naprawa →
 
 ### Problem 4: Race-condition przy przypisywaniu mechaników
 **Opis:** Gdy program działał bez opóźnień (makro `TESTING_NO_SLEEP`), występowały wyścigi gdzie mechanik dostawał zlecenia zanim zdążył zaktualizować swój status w pamięci dzielonej. Prowadziło to do sytuacji, w której mechanik wykonywał zlecenia z kolejki komunikatów nawet po zamknięciu serwisu - kolejka zawierała komunikaty wysłane do "wolnego" mechanika, który w rzeczywistości był już zajęty.  
-**Rozwiązanie:** Wprowadzono semafor binarny `SEM_MECHANIC_ASSIGN` ([common.h#L124](common.h#L124)) synchronizujący sekcję krytyczną przypisywania mechaników. Semafor jest inicjalizowany wartością 1 w [main.c#L121](main.c#L121). W funkcji obsługi klienta ([role_service.c#L186-L216](role_service.c#L186)) przed szukaniem wolnego mechanika pobierany jest semafor (`sem_lock`), następnie status mechanika jest **natychmiastowo aktualizowany** na zajęty (`shm->mechanic_status[i] = 1`) jeszcze przed wysłaniem komunikatu ze zleceniem. Dopiero po oznaczeniu mechanika jako zajętego semafor jest zwalniany, co gwarantuje, że inny proces obsługi nie wyśle zlecenia do tego samego mechanika.
+**Rozwiązanie:** Wprowadzono semafor binarny `SEM_MECHANIC_ASSIGN` ([common.h#L127](common.h#L127)) synchronizujący sekcję krytyczną przypisywania mechaników. Semafor jest inicjalizowany wartością 1 w [main.c#L123](main.c#L123). W funkcji obsługi klienta ([role_service.c#L173-L216](role_service.c#L173)) przed szukaniem wolnego mechanika pobierany jest semafor (`sem_lock`), następnie status mechanika jest **natychmiastowo aktualizowany** na zajęty (`shm->mechanic_status[i] = 1`) jeszcze przed wysłaniem komunikatu ze zleceniem. Dopiero po oznaczeniu mechanika jako zajętego semafor jest zwalniany, co gwarantuje, że inny proces obsługi nie wyśle zlecenia do tego samego mechanika.
 
 ### Problem 5: Ujemna liczba klientów w kolejce
 **Opis:** Licznik `clients_in_queue` w pamięci dzielonej potrafił osiągać wartości ujemne. Problem wynikał z nieprawidłowej synchronizacji przy odłączaniu klientów - dekrementacja licznika następowała wielokrotnie lub w niewłaściwym momencie.  
-**Rozwiązanie:** Przebudowano system odłączania klientów w funkcji `client_exit()` ([role_client.c#L5-L23](role_client.c#L5)). Funkcja przyjmuje flagę `in_queue` określającą, czy klient faktycznie znajduje się w kolejce i wymaga dekrementacji licznika. Dodatkowo, każda operacja na liczniku jest chroniona semaforem `SEM_LOG`, a przed dekrementacją sprawdzany jest warunek `if (shm->clients_in_queue > 0)`, co zapobiega zejściu poniżej zera. Dekrementacja i zwolnienie semafora kolejki (`SEM_QUEUE`) wykonywane są atomowo w tej samej sekcji krytycznej. Analogiczna logika jest zastosowana w obsłudze klienta ([role_service.c#L66-L73](role_service.c#L66) oraz [role_service.c#L128-L132](role_service.c#L128)).
+**Rozwiązanie:** Przebudowano system odłączania klientów w funkcji `client_exit()` ([role_client.c#L5-L22](role_client.c#L5)). Funkcja przyjmuje flagę `in_queue` określającą, czy klient faktycznie znajduje się w kolejce i wymaga dekrementacji licznika. Dodatkowo, każda operacja na liczniku jest chroniona semaforem `SEM_LOG`, a przed dekrementacją sprawdzany jest warunek `if (shm->clients_in_queue > 0)`, co zapobiega zejściu poniżej zera. Dekrementacja i zwolnienie semafora kolejki (`SEM_QUEUE`) wykonywane są atomowo w tej samej sekcji krytycznej. Analogiczna logika jest zastosowana w obsłudze klienta ([role_service.c#L69-L73](role_service.c#L69) oraz [role_service.c#L130-L134](role_service.c#L130)).
 
 ### Problem 6: Awaria procesu nie kończyła symulacji
 **Opis:** Jeśli któryś z procesów potomnych (mechanik, obsługa, kasjer, menedżer lub generator) kończył się z błędem, pozostałe procesy nadal działały, co prowadziło do nieprawidłowego stanu symulacji.  
-**Rozwiązanie:** W klasie głównej ([main.c#L6-L8](main.c#L6)) zaimplementowano tablicę `pids[100]` przechowującą wszystkie PID-y procesów potomnych oraz licznik `pid_count`. W głównej pętli symulacji ([main.c#L217-L234](main.c#L217)) dodano skanowanie procesów przy użyciu `waitpid(-1, &status, WNOHANG)`. Dla każdego zakończonego procesu sprawdzany jest kod wyjścia - jeśli `WEXITSTATUS(status) != 0`, ustawiana jest flaga `shm->simulation_running = 0`, co powoduje zakończenie całej symulacji. Dodatkowo logowane są procesy zakończone sygnałem (z pominięciem standardowych sygnałów `SIGTERM` i `SIGKILL` używanych przy normalnym zamykaniu).
+**Rozwiązanie:** W klasie głównej ([main.c#L6-L8](main.c#L6)) zaimplementowano tablicę `pids[100]` przechowującą wszystkie PID-y procesów potomnych oraz licznik `pid_count`. W głównej pętli symulacji ([main.c#L222-L249](main.c#L222)) dodano skanowanie procesów przy użyciu `waitpid(-1, &status, WNOHANG)`. Dla każdego zakończonego procesu sprawdzany jest kod wyjścia - jeśli `WEXITSTATUS(status) != 0`, ustawiana jest flaga `shm->simulation_running = 0`, co powoduje zakończenie całej symulacji. Dodatkowo logowane są procesy zakończone sygnałem (z pominięciem standardowych sygnałów `SIGTERM` i `SIGKILL` używanych przy normalnym zamykaniu).
 
 ---
 
@@ -168,7 +168,7 @@ Klient → Kolejka MSG → Obsługa → Przypisanie do Mechanika → Naprawa →
 
 ### Test 7: Działanie programu bez sleepów
 **Cel:** Sprawdzenie czy program nie zawiesi się pod dużym obciążeniem.
-**Procedura:** Odkomentowanie [#define TESTING_NO_SLEEP](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.h#L5)
+**Procedura:** Odkomentowanie [#define TESTING_NO_SLEEP](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.h#L7)
 **Oczekiwany rezultat:** Program działa przez dłuższy czas.
 **Status:** ✅
 
@@ -213,37 +213,37 @@ Klient → Kolejka MSG → Obsługa → Przypisanie do Mechanika → Naprawa →
 ## 7. Linki do istotnych fragmentów kodu
 
 ### a) Tworzenie i obsługa plików
-- [`fopen()`, `fprintf()`, `fclose()` - logowanie do raport.txt](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L111-L174)
+- [`fopen()`, `fprintf()`, `fclose()` - logowanie do raport.txt](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L93-L171)
 
 ### b) Tworzenie procesów
-- [`fork()` - tworzenie procesów mechaników](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L143-L151)
+- [`fork()` - tworzenie procesów mechaników](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L141-L152)
 - [`execl()` - uruchamianie programów ról](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L147)
-- [`exit()` - zakończenie procesu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_client.c#L23)
-- [`wait()/waitpid()` - oczekiwanie na procesy potomne](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L223-L236)
+- [`exit()` - zakończenie procesu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_client.c#L22)
+- [`wait()/waitpid()` - oczekiwanie na procesy potomne](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L222-L249)
 
 ### c) Obsługa sygnałów
-- [`signal()` - ustawienie handlerów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L90-L92)
-- [`sigaction()` - zaawansowana obsługa sygnałów mechanika](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_mechanic.c#L59-L62)
-- [`kill()` - wysyłanie sygnałów do procesów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L27)
-- [`raise()` - wysłanie sygnału do siebie](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L71)
+- [`signal()` - ustawienie handlerów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L105-L107)
+- [`sigaction()` - zaawansowana obsługa sygnałów mechanika](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_mechanic.c#L59-L63)
+- [`kill()` - wysyłanie sygnałów do procesów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L27-L29)
+- [`raise()` - wysłanie sygnału do siebie](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L85)
 
 ### d) Synchronizacja procesów (semafory)
-- [`ftok()` - generowanie klucza IPC](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L95-L97)
-- [`semget()` - tworzenie zestawu semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L102)
-- [`semctl()` - inicjalizacja semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L117-L121)
-- [`semop()` - operacje na semaforach (lock/unlock)](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L229-L245)
+- [`ftok()` - generowanie klucza IPC](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L110-L112)
+- [`semget()` - tworzenie zestawu semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L116)
+- [`semctl()` - inicjalizacja semaforów](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L120-L123)
+- [`semop()` - operacje na semaforach (lock/unlock)](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L228-L243)
 
 ### e) Segmenty pamięci dzielonej
-- [`shmget()` - tworzenie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L101)
-- [`shmat()` - dołączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L105)
+- [`shmget()` - tworzenie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L115)
+- [`shmat()` - dołączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L118)
 - [`shmdt()` - odłączanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/role_mechanic.c#L145)
-- [`shmctl()` - usuwanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L35)
+- [`shmctl()` - usuwanie segmentu](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L37)
 
 ### f) Kolejki komunikatów
-- [`msgget()` - tworzenie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L100)
-- [`msgsnd()` - wysyłanie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L250-L268)
-- [`msgrcv()` - odbieranie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L271-L313)
-- [`msgctl()` - usuwanie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L34)
+- [`msgget()` - tworzenie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L114)
+- [`msgsnd()` - wysyłanie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L248-L266)
+- [`msgrcv()` - odbieranie wiadomości](https://github.com/K0dziaK/serwis-samochodowy/blob/master/common.c#L269-L313)
+- [`msgctl()` - usuwanie kolejki](https://github.com/K0dziaK/serwis-samochodowy/blob/master/main.c#L36)
 
 ---
 
